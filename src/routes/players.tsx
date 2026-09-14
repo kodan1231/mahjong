@@ -27,7 +27,9 @@ playerRoutes.get("/players", requireAdmin, async (c) => {
           <tbody>
             {all.map((p) => (
               <tr>
-                <td>{p.name}</td>
+                <td>
+                  <a href={`/players/${p.id}`}>{p.name}</a>
+                </td>
                 <td>
                   <span class={`badge ${p.active ? "badge-confirmed" : ""}`}>
                     {p.active ? "有効" : "無効"}

@@ -14,19 +14,12 @@ import {
   photoUploads,
 } from "../db/schema";
 import { Layout } from "../views/layout";
+import { Signed } from "../views/components";
 import { requireAdmin, isAdmin } from "../lib/auth";
 import { computeRankAndChips, normalizeRawScore, ORIGIN_SCORE, type DisplayMode } from "../lib/scoring";
 import { computeTotals, computeDaySummary, yearRange } from "../lib/aggregate";
 
 export const dayRoutes = new Hono<{ Bindings: Env }>();
-
-const Signed = ({ n, unit = "" }: { n: number; unit?: string }) => (
-  <span class={n >= 0 ? "plus" : "minus"}>
-    {n >= 0 ? "+" : ""}
-    {n}
-    {unit}
-  </span>
-);
 
 // ---------- ダッシュボード ----------
 
@@ -70,6 +63,9 @@ dayRoutes.get("/", async (c) => {
             </li>
           ))}
         </ul>
+        <p>
+          <a href="/days">すべての対局日を見る →</a>
+        </p>
         {admin && (
           <p>
             <a class="btn" href="/days/new">
@@ -82,7 +78,11 @@ dayRoutes.get("/", async (c) => {
   );
 });
 
-const TotalsTable = ({ totals }: { totals: { name: string; rawTotal: number; chipTotal: number }[] }) => (
+const TotalsTable = ({
+  totals,
+}: {
+  totals: { playerId: number; name: string; rawTotal: number; chipTotal: number }[];
+}) => (
   <table>
     <thead>
       <tr>
@@ -94,7 +94,9 @@ const TotalsTable = ({ totals }: { totals: { name: string; rawTotal: number; chi
     <tbody>
       {totals.map((t) => (
         <tr>
-          <td>{t.name}</td>
+          <td>
+            <a href={`/players/${t.playerId}`}>{t.name}</a>
+          </td>
           <td>
             <Signed n={t.rawTotal} />
           </td>
@@ -108,6 +110,42 @@ const TotalsTable = ({ totals }: { totals: { name: string; rawTotal: number; chi
 );
 
 // ---------- 対局日 ----------
+
+dayRoutes.get("/days", async (c) => {
+  const db = getDb(c.env);
+  const admin = await isAdmin(c);
+  const allDays = await db.select().from(days).orderBy(desc(days.date));
+
+  const byYear = new Map<string, typeof allDays>();
+  for (const d of allDays) {
+    const year = d.date.slice(0, 4);
+    const list = byYear.get(year) ?? [];
+    list.push(d);
+    byYear.set(year, list);
+  }
+  const years = [...byYear.keys()].sort((a, b) => b.localeCompare(a));
+
+  return c.html(
+    <Layout title="対局日一覧" isAdmin={admin}>
+      <h1>対局日一覧</h1>
+      {allDays.length === 0 && <p>まだ対局日がありません。</p>}
+      {years.map((year) => (
+        <div class="card">
+          <h2 style="margin-top:0">{year}年</h2>
+          <ul>
+            {byYear.get(year)!.map((d) => (
+              <li>
+                <a href={`/days/${d.id}`}>
+                  {d.date} {d.memo ? `(${d.memo})` : ""}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </Layout>,
+  );
+});
 
 dayRoutes.get("/days/new", requireAdmin, async (c) => {
   const db = getDb(c.env);
@@ -222,18 +260,31 @@ dayRoutes.get("/days/:id", async (c) => {
     : [];
 
   const daySummary = await computeDaySummary(db, dayId);
+  const autoRefresh = c.req.query("autorefresh") === "1";
 
   return c.html(
-    <Layout title={`${day.date} の対局`} isAdmin={admin}>
+    <Layout
+      title={`${day.date} の対局`}
+      isAdmin={admin}
+      extraHead={autoRefresh ? <meta http-equiv="refresh" content={`20;url=/days/${dayId}?autorefresh=1`} /> : undefined}
+    >
       <h1>
         {day.date} {day.memo ? `(${day.memo})` : ""}
       </h1>
       <p>参加者: {participants.map((p) => p.name).join(" / ")}</p>
-      {admin && (
-        <p>
-          <a href={`/days/${dayId}/edit`}>この対局日を編集する →</a>
-        </p>
-      )}
+      <p>
+        {autoRefresh ? (
+          <a href={`/days/${dayId}`}>自動更新を止める</a>
+        ) : (
+          <a href={`/days/${dayId}?autorefresh=1`}>自動更新ON（20秒ごと。みんなで見る用）</a>
+        )}
+        {admin && (
+          <>
+            {" / "}
+            <a href={`/days/${dayId}/edit`}>この対局日を編集する</a>
+          </>
+        )}
+      </p>
 
       <div class="card">
         <h2 style="margin-top:0">この日の小計</h2>

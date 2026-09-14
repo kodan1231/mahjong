@@ -1,4 +1,4 @@
-import { eq, and, gte, lt, inArray } from "drizzle-orm";
+import { eq, and, gte, lt, inArray, desc } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   players,
@@ -156,4 +156,96 @@ export async function computeDaySummary(db: Db, dayId: number): Promise<PlayerTo
       chipTotal: (rankChipTotals.get(p.playerId) ?? 0) + (yakumanTotals.get(p.playerId) ?? 0),
     }))
     .sort((a, b) => b.rawTotal - a.rawTotal);
+}
+
+export interface PlayerYearlyTotal {
+  year: number;
+  rawTotal: number;
+  chipTotal: number;
+}
+
+/** そのプレイヤーが参加したことのある年ごとに、素点合計・チップ合計を返す（古い年→新しい年の順）。 */
+export async function computePlayerYearlyBreakdown(db: Db, playerId: number): Promise<PlayerYearlyTotal[]> {
+  const rows = await db
+    .select({ date: days.date })
+    .from(dayParticipants)
+    .innerJoin(days, eq(dayParticipants.dayId, days.id))
+    .where(eq(dayParticipants.playerId, playerId));
+
+  const years = [...new Set(rows.map((r) => Number(r.date.slice(0, 4))))].sort((a, b) => a - b);
+
+  const results: PlayerYearlyTotal[] = [];
+  for (const year of years) {
+    const totals = await computeTotals(db, yearRange(year));
+    const mine = totals.find((t) => t.playerId === playerId);
+    results.push({ year, rawTotal: mine?.rawTotal ?? 0, chipTotal: mine?.chipTotal ?? 0 });
+  }
+  return results;
+}
+
+export interface RankDistribution {
+  rank: number;
+  count: number;
+}
+
+/** 確定済み半荘における、そのプレイヤーの着順（1〜4位）ごとの回数。 */
+export async function computeRankDistribution(db: Db, playerId: number): Promise<RankDistribution[]> {
+  const rows = await db
+    .select({ rank: sessionScores.rank })
+    .from(sessionScores)
+    .innerJoin(gameSessions, eq(sessionScores.gameSessionId, gameSessions.id))
+    .where(and(eq(sessionScores.playerId, playerId), eq(gameSessions.status, "confirmed")));
+
+  const counts = new Map<number, number>();
+  for (const r of rows) {
+    if (r.rank == null) continue;
+    counts.set(r.rank, (counts.get(r.rank) ?? 0) + 1);
+  }
+  return [1, 2, 3, 4].map((rank) => ({ rank, count: counts.get(rank) ?? 0 }));
+}
+
+export interface PlayerYakumanWin {
+  dayId: number;
+  date: string;
+  yakuName: string;
+}
+
+/** そのプレイヤーが和了した役満の一覧（新しい順）。 */
+export async function computePlayerYakumanWins(db: Db, playerId: number): Promise<PlayerYakumanWin[]> {
+  return db
+    .select({ dayId: days.id, date: days.date, yakuName: yakumanEvents.yakuName })
+    .from(yakumanEvents)
+    .innerJoin(days, eq(yakumanEvents.dayId, days.id))
+    .where(eq(yakumanEvents.winnerPlayerId, playerId))
+    .orderBy(desc(days.date));
+}
+
+export interface ScorePoint {
+  date: string;
+  seq: number;
+  cumulativeRaw: number;
+}
+
+/** 確定済み半荘を古い順に並べ、素点差分（対配給原点）の累計推移を返す。折れ線グラフ用。 */
+export async function computePlayerScoreHistory(db: Db, playerId: number): Promise<ScorePoint[]> {
+  const rows = await db
+    .select({
+      date: days.date,
+      seq: gameSessions.seq,
+      rawScore: sessionScores.rawScore,
+    })
+    .from(sessionScores)
+    .innerJoin(gameSessions, eq(sessionScores.gameSessionId, gameSessions.id))
+    .innerJoin(days, eq(gameSessions.dayId, days.id))
+    .where(and(eq(sessionScores.playerId, playerId), eq(gameSessions.status, "confirmed")));
+
+  const sorted = rows
+    .filter((r): r is typeof r & { rawScore: number } => r.rawScore != null)
+    .sort((a, b) => (a.date === b.date ? a.seq - b.seq : a.date.localeCompare(b.date)));
+
+  let cumulative = 0;
+  return sorted.map((r) => {
+    cumulative += r.rawScore - ORIGIN_SCORE;
+    return { date: r.date, seq: r.seq, cumulativeRaw: cumulative };
+  });
 }

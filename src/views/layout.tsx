@@ -1,14 +1,19 @@
-import type { FC, PropsWithChildren } from "hono/jsx";
+import type { FC, PropsWithChildren, Child } from "hono/jsx";
 
-const NAV_LINKS = [
+const PUBLIC_NAV_LINKS = [
   { href: "/", label: "ホーム" },
+  { href: "/days", label: "対局日一覧" },
+];
+
+const ADMIN_NAV_LINKS = [
   { href: "/days/new", label: "対局日を開始" },
   { href: "/players", label: "プレイヤー管理" },
 ];
 
-export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean }>> = ({
+export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean; extraHead?: Child }>> = ({
   title,
   isAdmin,
+  extraHead,
   children,
 }) => (
   <html lang="ja">
@@ -18,28 +23,32 @@ export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean }>> 
       <meta name="robots" content="noindex" />
       <title>{title} - 麻雀スコア集計</title>
       <style>{css}</style>
+      {extraHead}
     </head>
     <body>
       <header class="app-header">
         <a class="brand" href="/">
           麻雀スコア集計
         </a>
-        {isAdmin ? (
-          <nav class="app-nav">
-            {NAV_LINKS.map((l) => (
-              <a href={l.href}>{l.label}</a>
-            ))}
-            <form method="post" action="/logout" class="inline-form">
-              <button type="submit" class="link-button">
-                ログアウト
-              </button>
-            </form>
-          </nav>
-        ) : (
-          <nav class="app-nav">
+        <nav class="app-nav">
+          {PUBLIC_NAV_LINKS.map((l) => (
+            <a href={l.href}>{l.label}</a>
+          ))}
+          {isAdmin ? (
+            <>
+              {ADMIN_NAV_LINKS.map((l) => (
+                <a href={l.href}>{l.label}</a>
+              ))}
+              <form method="post" action="/logout" class="inline-form">
+                <button type="submit" class="link-button">
+                  ログアウト
+                </button>
+              </form>
+            </>
+          ) : (
             <a href="/login">管理者ログイン</a>
-          </nav>
-        )}
+          )}
+        </nav>
       </header>
       <main class="app-main">{children}</main>
     </body>

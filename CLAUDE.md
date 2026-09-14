@@ -63,11 +63,19 @@ Cloudflare Workers + D1 + R2 + Workers AI (Hono) で構築。詳細なセット�
 
 - `computeTotals(db, range?)`: 期間指定なしで通算、`yearRange(year)`で年間集計
 - `computeDaySummary(db, dayId)`: 当日の小計
+- `computePlayerYearlyBreakdown(db, playerId)`: そのプレイヤーが参加した年ごとの素点・チップ集計
+- `computeRankDistribution(db, playerId)`: 着順（1〜4位）ごとの回数
+- `computePlayerYakumanWins(db, playerId)`: そのプレイヤーが和了した役満一覧
+- `computePlayerScoreHistory(db, playerId)`: 確定済み半荘を時系列に並べた素点差分の累計推移（個人ページの折れ線グラフ用）
+
+共有UIコンポーネント（`src/views/components.tsx`）: `Signed`（+/-付きの数値表示）、`Sparkline`（追加ライブラリ無しでSVGの折れ線グラフをサーバー側生成）
 
 ### ルート構成
 
-- 公開: `/`（ダッシュボード）, `/days/:id`（対局日詳細）, `/stats/:year`（年間集計）
-- 管理者専用: `/login`, `/players`, `/days/new`, `/days/:id/sessions/new`, `/days/:id/sessions/:sid/capture`, `/api/ocr`, `/days/:id/sessions/:sid/confirm`, `/days/:id/yakuman`, `/days/:id/sessions/:sid/hands`
+- 公開: `/`（ダッシュボード）, `/days`（対局日一覧、年ごとにグループ化）, `/days/:id`（対局日詳細、`?autorefresh=1`で20秒ごとの自動更新トグル）, `/stats/:year`（年間集計）, `/players/:id`（個人成績：通算/年別の素点・チップ、素点推移グラフ、着順分布、役満一覧）
+- 管理者専用: `/login`, `/players`, `/days/new`, `/days/:id/edit`, `/days/:id/sessions/new`, `/days/:id/sessions/:sid/capture`, `/api/ocr`, `/days/:id/sessions/:sid/confirm`, `/days/:id/yakuman`, `/days/:id/sessions/:sid/hands`, 各種delete系ルート
+
+ナビゲーション（`src/views/layout.tsx`）は「ホーム」「対局日一覧」を常時公開表示し、管理者ログイン時のみ「対局日を開始」「プレイヤー管理」を追加表示する。`Layout`は`extraHead`propでhead内に任意要素（自動更新用の`<meta http-equiv="refresh">`など）を差し込める。
 
 **Honoの罠**: サブルーターに`.use("*", middleware)`を書いて`app.route("/", subApp)`でマウントすると、そのミドルウェアがアプリ全体（他のサブルーターのパスも含む）にかかってしまう。各ルートに個別で `requireAdmin` を渡す方式にしている（`playerRoutes.get("/players", requireAdmin, handler)`）。新しい管理者専用ルートを追加する際もこの書き方を踏襲すること。
 

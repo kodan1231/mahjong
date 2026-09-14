@@ -23,7 +23,7 @@ export const TotalsTable = ({
   showHeader?: boolean;
   showChips?: boolean;
 }) => (
-  <table>
+  <table class="session-table">
     {showHeader && (
       <thead>
         <tr>

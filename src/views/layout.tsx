@@ -16,7 +16,7 @@ export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean; ext
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
       <link
         rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700;800&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700;800&family=Yusei+Magic&display=swap"
       />
       <style>{css}</style>
       {extraHead}
@@ -72,7 +72,7 @@ const css = `
   html { font-size: 20px; }
   body {
     margin: 0;
-    font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: "Yusei Magic", "Noto Sans JP", "Hiragino Sans", "Yu Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background:
       radial-gradient(circle at 20% 20%, rgba(255,255,255,0.05) 0, transparent 40%),
       radial-gradient(circle at 80% 60%, rgba(255,255,255,0.04) 0, transparent 45%),

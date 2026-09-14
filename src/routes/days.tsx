@@ -95,24 +95,40 @@ async function loadDayDetail(db: Db, dayId: number) {
 
 type DayDetail = NonNullable<Awaited<ReturnType<typeof loadDayDetail>>>;
 
+// 対局中/終了バッジと「編集」リンクを日付見出し(<h1>)の末尾に埋め込んで同じ行に表示するための部品。
+// <small>はphrasing contentなのでh1の子として置いてもHTML的に問題ない（<form>は不可のため
+// 「終了する」ボタンはここに含めず、DayDetailBody側で見出しの下の小さな行として別途出す）。
+const DayHeaderBadge = ({
+  dayId,
+  admin,
+  status,
+}: {
+  dayId: number;
+  admin: boolean;
+  status: "open" | "closed";
+}) => (
+  <small style="font-size:0.5em; margin-left:10px; display:inline-flex; gap:8px; align-items:center; vertical-align:middle">
+    <span class={`badge ${status === "open" ? "badge-open" : "badge-closed"}`}>
+      {status === "open" ? "対局中" : "終了"}
+    </span>
+    {admin && <a href={`/days/${dayId}/edit`}>編集</a>}
+  </small>
+);
+
 const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; data: DayDetail }) => {
   const { day, participants, sessions, allScores, allHands, events, allTargets, daySummary } = data;
 
   return (
     <>
-      <p style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:-4px">
-        <span class={`badge ${day.status === "open" ? "badge-open" : "badge-closed"}`}>
-          {day.status === "open" ? "対局中" : "終了"}
-        </span>
-        {admin && <a href={`/days/${dayId}/edit`}>編集</a>}
-        {admin && day.status === "open" && (
+      {admin && day.status === "open" && (
+        <p style="margin:-4px 0 10px">
           <form class="inline-form" method="post" action="/days/close">
             <button class="link-button" type="submit">
               終了する
             </button>
           </form>
-        )}
-      </p>
+        </p>
+      )}
 
       <div class="card">
         <h2>この日の小計</h2>
@@ -148,10 +164,7 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
               <tbody>
                 {rows.map((r) => (
                   <tr>
-                    <td>
-                      {r.name}
-                      {r.isHakoware ? " (箱割れ)" : ""}
-                    </td>
+                    <td>{r.name}</td>
                     <td>{r.rawScore ?? "-"}</td>
                     <td>{r.rank ?? "-"}</td>
                     <td>{r.rankChip != null ? <Signed n={r.rankChip} /> : "-"}</td>
@@ -355,6 +368,7 @@ dayRoutes.get("/", async (c) => {
           （{data.day.date}
           {data.day.memo ? ` ${data.day.memo}` : ""}）
         </small>
+        <DayHeaderBadge dayId={targetDay.id} admin={admin} status={data.day.status} />
       </h1>
       <DayDetailBody dayId={targetDay.id} admin={admin} data={data} />
     </Layout>,
@@ -474,6 +488,7 @@ dayRoutes.get("/days/:id", async (c) => {
       </p>
       <h1>
         {data.day.date} {data.day.memo ? `(${data.day.memo})` : ""}
+        <DayHeaderBadge dayId={dayId} admin={admin} status={data.day.status} />
       </h1>
       <DayDetailBody dayId={dayId} admin={admin} data={data} />
     </Layout>,

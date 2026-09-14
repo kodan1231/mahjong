@@ -416,6 +416,13 @@ dayRoutes.post("/days", requireAdmin, async (c) => {
     if (openDay) return c.redirect(`/days/${openDay.id}`);
   }
 
+  // 同じ日付の対局日が既にあれば、重複作成せずそちらへ誘導する
+  // （「まとめて入力」で行を追加したいだけなのに誤って新規作成してしまうケースを防ぐ）。
+  const [existingSameDate] = await db.select().from(days).where(eq(days.date, date));
+  if (existingSameDate) {
+    return c.redirect(`/days/${existingSameDate.id}/sheet`);
+  }
+
   const [day] = await db
     .insert(days)
     .values({ date, memo, status: isToday ? "open" : "closed" })
@@ -686,7 +693,11 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
   return c.html(
     <Layout title="点数を確認" isAdmin={true}>
       <h1>第{session.seq}半荘: 点数を確認</h1>
-      {tieWarning && <p class="warning">同点です。順位を確認してください（ポイントを調整するか、そのまま確定できます）。</p>}
+      {tieWarning && (
+        <p class="warning">
+          同点です。ポイントを調整して同点を解消するか、下のチェックを入れて座席の並び順（左の座席ほど上位）で仮の着順を確定してください。
+        </p>
+      )}
       <p>
         点数表示機の表示形式:{" "}
         {displayMode === "diff" ? `配給原点(${ORIGIN_SCORE}ポイント)からの±差分` : "素点をそのまま表示"}
@@ -733,6 +744,11 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
             </div>
           );
         })}
+        {tieWarning && (
+          <label style="font-weight:normal">
+            <input type="checkbox" name="acceptTie" value="1" /> 同点のまま座席順で仮に確定する
+          </label>
+        )}
         <button class="btn" type="submit">
           確定
         </button>
@@ -755,11 +771,13 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
     isHakoware: body[`hakoware_${seatIndex}`] === "on",
   }));
 
+  const acceptTie = body.acceptTie === "1";
+
   const { ranked, hasTie } = computeRankAndChips(
     seatInputs.map(({ playerId, rawScore }) => ({ playerId, rawScore })),
   );
 
-  if (hasTie) {
+  if (hasTie && !acceptTie) {
     // 一旦入力値だけ保存し、確認画面に戻して警告を出す（着順・チップは未確定のまま）
     for (const s of seatInputs) {
       await db
@@ -972,7 +990,7 @@ dayRoutes.post("/days/:id/edit", requireAdmin, async (c) => {
 // 「行＝半荘、列＝参加者」の表に直接ポイント（素点÷1000）を入力して一括保存できる画面。
 // 箱割れ・役満・局メモはここでは扱わず、通常の対局日詳細ページから編集する。
 
-const SHEET_EXTRA_BLANK_ROWS = 5;
+const SHEET_EXTRA_BLANK_ROWS = 8;
 
 dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
   const dayId = Number(c.req.param("id"));
@@ -999,25 +1017,34 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
     ? await db.select().from(sessionScores).where(inArray(sessionScores.gameSessionId, sessionIds))
     : [];
 
-  const totalRows = sessions.length + SHEET_EXTRA_BLANK_ROWS;
-  const skippedParam = c.req.query("skipped");
-  const skippedSeqs = skippedParam ? skippedParam.split(",").map(Number) : [];
+  const totalRows = Math.max(sessions.length, 0) + SHEET_EXTRA_BLANK_ROWS;
+  const partialParam = c.req.query("partial");
+  const partialSeqs = partialParam ? partialParam.split(",").map(Number) : [];
+  const tiedParam = c.req.query("tied");
+  const tiedSeqs = tiedParam ? tiedParam.split(",").map(Number) : [];
 
   return c.html(
     <Layout title="まとめて入力" isAdmin={true}>
       <h1>{day.date}: まとめて入力</h1>
       <p>
-        行＝半荘、列＝参加者。1半荘につき4人分のポイント（素点÷1000、例: 32000点なら32）を入力してください（同点・3人以下の入力は保存されません）。
-        箱割れ・役満・局メモは<a href={`/days/${dayId}`}>対局日の詳細ページ</a>から編集してください。
+        行＝半荘、列＝参加者。1半荘につき4人分のポイント（素点÷1000、例: 32000点なら32）を入力してください。
+        箱割れの場合はそのままマイナスのポイントを入力してください（0未満を自動で「箱割れ」として記録します）。
+        役満・局メモは<a href={`/days/${dayId}`}>対局日の詳細ページ</a>から編集してください。
       </p>
-      {skippedSeqs.length > 0 && (
+      {partialSeqs.length > 0 && (
         <p class="warning">
-          第{skippedSeqs.join("・")}回は保存されませんでした（4人分そろっていない、または同点があります）。確認して入力し直してください。
+          第{partialSeqs.join("・")}回は4人分そろっていないため保存されませんでした。確認して入力し直してください。
+        </p>
+      )}
+      {tiedSeqs.length > 0 && (
+        <p class="warning">
+          第{tiedSeqs.join("・")}回はポイントが同点のため、着順・チップは未確定のまま保存しました。
+          下のチェックを入れて再度保存すると、入力した順（左の列ほど上位）で仮の着順を確定します。数値を直して同点を解消しても構いません。
         </p>
       )}
       <div style="overflow-x:auto">
         <form method="post" action={`/days/${dayId}/sheet`}>
-          <table class="sheet-table">
+          <table class="sheet-table" id="sheet-table">
             <thead>
               <tr>
                 <th>回</th>
@@ -1054,6 +1081,16 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
             </tbody>
           </table>
           <p>
+            <button type="button" id="add-row-btn" class="btn btn-secondary">
+              ＋ 行を追加
+            </button>
+          </p>
+          {tiedSeqs.length > 0 && (
+            <label style="font-weight:normal; display:block; margin-bottom:10px">
+              <input type="checkbox" name="acceptTies" value="1" /> 同点の回を入力順で仮に確定する
+            </label>
+          )}
+          <p>
             <button class="btn" type="submit">
               まとめて保存
             </button>
@@ -1063,6 +1100,27 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
       <p>
         <a href={`/days/${dayId}`}>← 対局日の詳細に戻る</a>
       </p>
+      <script
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{
+          __html: `
+            document.getElementById('add-row-btn').addEventListener('click', () => {
+              const tbody = document.querySelector('#sheet-table tbody');
+              const rows = tbody.querySelectorAll('tr');
+              const lastRow = rows[rows.length - 1];
+              const lastSeq = Number(lastRow.firstElementChild.textContent);
+              const newSeq = lastSeq + 1;
+              const newRow = lastRow.cloneNode(true);
+              newRow.firstElementChild.textContent = String(newSeq);
+              newRow.querySelectorAll('input[type=number]').forEach((input) => {
+                input.value = '';
+                input.name = input.name.replace(/^score_\\d+_/, 'score_' + newSeq + '_');
+              });
+              tbody.appendChild(newRow);
+            });
+          `,
+        }}
+      />
     </Layout>,
   );
 });
@@ -1083,13 +1141,22 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
     .from(gameSessions)
     .where(eq(gameSessions.dayId, dayId))
     .orderBy(asc(gameSessions.seq));
+  const sessionBySeq = new Map(existingSessions.map((s) => [s.seq, s]));
 
   const body = await c.req.parseBody();
-  const totalRows = existingSessions.length + SHEET_EXTRA_BLANK_ROWS;
-  const skippedSeqs: number[] = [];
+  const acceptTies = body.acceptTies === "1";
 
-  for (let i = 0; i < totalRows; i++) {
-    const seq = i + 1;
+  // クライアント側の「＋行を追加」で行が増えている場合があるため、送信されたフィールドから最大回数を求める。
+  let maxSeq = existingSessions.length + SHEET_EXTRA_BLANK_ROWS;
+  for (const key of Object.keys(body)) {
+    const m = key.match(/^score_(\d+)_\d+$/);
+    if (m) maxSeq = Math.max(maxSeq, Number(m[1]));
+  }
+
+  const partialSeqs: number[] = [];
+  const tiedSeqs: number[] = [];
+
+  for (let seq = 1; seq <= maxSeq; seq++) {
     const entries: { playerId: number; rawScore: number }[] = [];
     for (const playerId of participantIds) {
       const raw = body[`score_${seq}_${playerId}`];
@@ -1101,17 +1168,39 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
     if (entries.length === 0) continue; // 未入力の行はスキップ
 
     if (entries.length !== 4) {
-      skippedSeqs.push(seq);
+      partialSeqs.push(seq);
       continue;
     }
 
     const { ranked, hasTie } = computeRankAndChips(entries);
-    if (hasTie) {
-      skippedSeqs.push(seq);
+    const existingSession = sessionBySeq.get(seq);
+
+    if (hasTie && !acceptTies) {
+      tiedSeqs.push(seq);
+      // 着順・チップは確定しないが、入力値は失わないよう pending として保存しておく
+      let session = existingSession;
+      if (!session) {
+        const [inserted] = await db
+          .insert(gameSessions)
+          .values({ dayId, seq, status: "pending", displayMode: "raw" })
+          .returning();
+        session = inserted;
+      }
+      if (!session) continue;
+      await db.delete(sessionScores).where(eq(sessionScores.gameSessionId, session.id));
+      await db.insert(sessionScores).values(
+        entries.map((e, seatIndex) => ({
+          gameSessionId: session!.id,
+          seatIndex,
+          playerId: e.playerId,
+          rawScore: e.rawScore,
+          isHakoware: e.rawScore < 0,
+        })),
+      );
       continue;
     }
 
-    let session = existingSessions[i];
+    let session = existingSession;
     if (!session) {
       const [inserted] = await db
         .insert(gameSessions)
@@ -1137,10 +1226,14 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
         rawScore: r.rawScore,
         rank: r.rank,
         rankChip: r.rankChip,
+        isHakoware: r.rawScore < 0,
       })),
     );
   }
 
-  const query = skippedSeqs.length ? `?skipped=${skippedSeqs.join(",")}` : "";
+  const params = new URLSearchParams();
+  if (partialSeqs.length) params.set("partial", partialSeqs.join(","));
+  if (tiedSeqs.length) params.set("tied", tiedSeqs.join(","));
+  const query = params.toString() ? `?${params.toString()}` : "";
   return c.redirect(`/days/${dayId}/sheet${query}`);
 });

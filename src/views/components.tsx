@@ -15,16 +15,20 @@ export const Signed = ({ n, unit = "" }: { n: number; unit?: string }) => {
 // チップ合計はあくまで付録情報のため一覧には出さず、個別成績ページ（/players/:id）でのみ表示する。
 export const TotalsTable = ({
   totals,
+  showHeader = true,
 }: {
   totals: { playerId: number; name: string; rawTotal: number; chipTotal: number }[];
+  showHeader?: boolean;
 }) => (
   <table>
-    <thead>
-      <tr>
-        <th>プレイヤー</th>
-        <th>ポイント合計</th>
-      </tr>
-    </thead>
+    {showHeader && (
+      <thead>
+        <tr>
+          <th>プレイヤー</th>
+          <th>ポイント合計</th>
+        </tr>
+      </thead>
+    )}
     <tbody>
       {totals.map((t) => (
         <tr>

@@ -44,7 +44,7 @@ statsRoutes.get("/years/:year", async (c) => {
 
       <div class="card">
         <h2>合計</h2>
-        <TotalsTable totals={totals} />
+        <TotalsTable totals={totals} showHeader={false} />
       </div>
 
       <div class="card">
@@ -76,7 +76,7 @@ statsRoutes.get("/overall", async (c) => {
       <TabBar active="overall" />
       <h1>通算成績</h1>
       <div class="card">
-        <TotalsTable totals={totals} />
+        <TotalsTable totals={totals} showHeader={false} />
       </div>
     </Layout>,
   );

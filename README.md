@@ -1,13 +1,12 @@
 # 麻雀スコア集計Webアプリ
 
 スマホで点数表示機を撮影 → OCRで点数を解析 → 年間の素点・着順チップを集計するWebアプリ。
-Cloudflare Workers + D1 + R2 + Workers AI (Hono) で構築。
+Cloudflare Workers + D1 + Workers AI (Hono) で構築。
 
 ## 構成
 
 - **Cloudflare Workers**: アプリ本体（Hono, TypeScript）
-- **D1**: プレイヤー・対局・スコア・チップ・役満・局メモのデータ
-- **R2**: 撮影した元写真
+- **D1**: プレイヤー・対局・スコア・チップ・役満・局メモのデータに加え、撮影した元写真もBLOBとして保存する（R2はクレジットカード登録なしでは有効化できないため見送った）
 - **Workers AI**: 点数表示機の写真から数値を読み取るVisionモデル（`@cf/meta/llama-3.2-11b-vision-instruct`）
 - **Drizzle ORM**: D1のスキーマ・マイグレーション管理
 
@@ -30,19 +29,13 @@ npm install
 npx wrangler d1 create mahjong-db
 ```
 
-出力された `database_id` を `wrangler.toml` の `REPLACE_WITH_D1_DATABASE_ID` に反映する。
+出力された `database_id` を `wrangler.toml` の `database_id` に反映する。
 
-### 3. R2バケットの作成
-
-```bash
-npx wrangler r2 bucket create mahjong-photos
-```
-
-### 4. Workers AIの有効化
+### 3. Workers AIの有効化
 
 Cloudflareダッシュボードで対象アカウントのWorkers AIが有効になっていることを確認する（`[ai]` バインディングは追加設定不要）。
 
-### 5. シークレットの設定
+### 4. シークレットの設定
 
 本番環境用に以下をWrangler secretとして登録する。
 
@@ -58,7 +51,7 @@ ADMIN_PASSWORD=devpassword
 AUTH_SECRET=dev-local-secret-change-me
 ```
 
-### 6. マイグレーション・シードの適用
+### 5. マイグレーション・シードの適用
 
 ```bash
 # ローカル

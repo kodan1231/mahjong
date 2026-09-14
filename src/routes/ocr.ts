@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { eq } from "drizzle-orm";
 import type { Env } from "../types";
 import { getDb } from "../db/client";
 import { photoUploads } from "../db/schema";
@@ -17,10 +18,7 @@ ocrRoutes.post("/api/ocr", requireAdmin, async (c) => {
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const r2Key = `sessions/${gameSessionId ?? "unknown"}/${Date.now()}-${crypto.randomUUID()}.jpg`;
-  await c.env.PHOTOS.put(r2Key, bytes, {
-    httpMetadata: { contentType: file.type || "image/jpeg" },
-  });
+  const contentType = file.type || "image/jpeg";
 
   const result = await analyzeScoreDisplay(c.env, bytes);
 
@@ -29,10 +27,24 @@ ocrRoutes.post("/api/ocr", requireAdmin, async (c) => {
     .insert(photoUploads)
     .values({
       gameSessionId,
-      r2Key,
+      imageData: bytes,
+      contentType,
       ocrRawJson: JSON.stringify(result),
     })
     .returning({ id: photoUploads.id });
 
-  return c.json({ photoUploadId: inserted?.id, values: result.values, r2Key });
+  return c.json({ photoUploadId: inserted?.id, values: result.values });
+});
+
+// 撮影した元写真を見返すための表示用エンドポイント（管理者専用）。
+ocrRoutes.get("/api/photos/:id", requireAdmin, async (c) => {
+  const id = Number(c.req.param("id"));
+  const db = getDb(c.env);
+
+  const [photo] = await db.select().from(photoUploads).where(eq(photoUploads.id, id));
+  if (!photo) return c.notFound();
+
+  return new Response(new Uint8Array(photo.imageData), {
+    headers: { "Content-Type": photo.contentType, "Cache-Control": "private, max-age=31536000" },
+  });
 });

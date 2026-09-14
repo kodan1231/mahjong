@@ -686,6 +686,14 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
       <p>
         表示形式:{" "}
         {displayMode === "diff" ? `配給原点(${ORIGIN_SCORE})からの±差分` : "素点そのまま"}
+        {latestPhoto && (
+          <>
+            {" ／ "}
+            <a href={`/api/photos/${latestPhoto.id}`} target="_blank" rel="noreferrer">
+              撮影した写真を見る
+            </a>
+          </>
+        )}
       </p>
       <form class="stack" method="post" action={`/days/${dayId}/sessions/${sessionId}/confirm`}>
         {rows.map((r) => {

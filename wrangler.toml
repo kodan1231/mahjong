@@ -6,12 +6,8 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "mahjong-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "91a51075-b771-416c-a277-4ba8dc4538cd"
 migrations_dir = "drizzle"
-
-[[r2_buckets]]
-binding = "PHOTOS"
-bucket_name = "mahjong-photos"
 
 [ai]
 binding = "AI"

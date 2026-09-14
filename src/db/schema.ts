@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, blob, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const players = sqliteTable("players", {
@@ -93,7 +93,10 @@ export const handLogs = sqliteTable("hand_logs", {
 export const photoUploads = sqliteTable("photo_uploads", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   gameSessionId: integer("game_session_id").references(() => gameSessions.id),
-  r2Key: text("r2_key").notNull(),
+  // 写真本体はR2ではなくD1にBLOBとして保存する（R2の有効化にクレジットカード登録が必要なため見送り）。
+  // クライアント側で長辺1600px程度に縮小してからアップロードしているため、D1の1行あたりサイズ上限には収まる想定。
+  imageData: blob("image_data", { mode: "buffer" }).notNull(),
+  contentType: text("content_type").notNull(),
   ocrRawJson: text("ocr_raw_json"),
   createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
 });

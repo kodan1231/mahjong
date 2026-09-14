@@ -12,6 +12,8 @@ export const days = sqliteTable("days", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   date: text("date").notNull(), // YYYY-MM-DD
   memo: text("memo"),
+  // 「対局日を開始」でopen、「対局日を終了」でclosedになる。同時にopenの日は1つまでの運用を想定。
+  status: text("status", { enum: ["open", "closed"] }).notNull().default("open"),
   createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
 });
 

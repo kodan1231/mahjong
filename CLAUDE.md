@@ -68,14 +68,33 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
 - `computePlayerYakumanWins(db, playerId)`: そのプレイヤーが和了した役満一覧
 - `computePlayerScoreHistory(db, playerId)`: 確定済み半荘を時系列に並べた素点差分の累計推移（個人ページの折れ線グラフ用）
 
-共有UIコンポーネント（`src/views/components.tsx`）: `Signed`（+/-付きの数値表示）、`Sparkline`（追加ライブラリ無しでSVGの折れ線グラフをサーバー側生成）
+共有UIコンポーネント（`src/views/components.tsx`）: `Signed`（+/-付きの数値表示）、`Sparkline`（追加ライブラリ無しでSVGの折れ線グラフをサーバー側生成）、`TotalsTable`（プレイヤー別 素点/チップ合計テーブル、名前は`/players/:id`へリンク）、`TabBar`（当日/年度別/通算の3タブ、`active`と`year`をpropで指定）
 
-### ルート構成
+### 対局日のライフサイクル（open/closed）
 
-- 公開: `/`（ダッシュボード）, `/days`（対局日一覧、年ごとにグループ化）, `/days/:id`（対局日詳細、`?autorefresh=1`で20秒ごとの自動更新トグル）, `/stats/:year`（年間集計）, `/players/:id`（個人成績：通算/年別の素点・チップ、素点推移グラフ、着順分布、役満一覧）
-- 管理者専用: `/login`, `/players`, `/days/new`, `/days/:id/edit`, `/days/:id/sessions/new`, `/days/:id/sessions/:sid/capture`, `/api/ocr`, `/days/:id/sessions/:sid/confirm`, `/days/:id/yakuman`, `/days/:id/sessions/:sid/hands`, 各種delete系ルート
+- `days.status`: `open`（進行中） / `closed`（終了済み）。同時にopenの日は1つまでの運用（`/days/new`・`POST /days`は既にopenな日があれば新規作成をブロックしてその日にリダイレクトする）
+- 管理者ナビの「対局日を開始」→`/days/new`、「対局日を終了」→`POST /days/close`（現在openな日を探してclosedにし、その日の詳細へリダイレクト。openな日が無ければ`/`へ）。この2つは管理者メニューの先頭に配置（`src/views/layout.tsx`）
+- 「当日」タブ（`GET /`）はopenな日があればその内容を表示し、無ければ「現在進行中の対局日はありません」を表示する
 
-ナビゲーション（`src/views/layout.tsx`）は「ホーム」「対局日一覧」を常時公開表示し、管理者ログイン時のみ「対局日を開始」「プレイヤー管理」を追加表示する。`Layout`は`extraHead`propでhead内に任意要素（自動更新用の`<meta http-equiv="refresh">`など）を差し込める。
+### ルート構成（3タブ + 個人ページ + 履歴ドリルダウン）
+
+- 公開:
+  - `GET /`（当日タブ。openな対局日の内容をそのまま表示）
+  - `GET /years/:year`（年度別タブ。その年の合計テーブル＋終了済み対局日一覧。日付をクリックすると`/days/:id`へ）
+  - `GET /overall`（通算タブ。全期間の合計テーブルのみ）
+  - `GET /days/:id`（対局日の詳細。年タブから日付をクリックして辿り着く想定。`?autorefresh=1`で20秒ごとの自動更新トグルも維持）
+  - `GET /players/:id`（個人成績：通算合計・素点推移グラフ・年別内訳・着順分布・役満一覧。**通算の数値はここでのみ表示**し、他のページではプレイヤー名のリンク経由でここに誘導する）
+- 管理者専用: `/login`, `/players`, `/days/new`, `POST /days/close`, `/days/:id/edit`, `/days/:id/sessions/new`, `/days/:id/sessions/:sid/capture`, `/api/ocr`, `/days/:id/sessions/:sid/confirm`, `/days/:id/yakuman`, `/days/:id/sessions/:sid/hands`, 各種delete系ルート
+
+`/days`（対局日一覧・年ごとにグループ化する単独ページ）と`/stats/:year`は廃止し、`/years/:year`に統合した。年間の対局数が少ない（12試合程度）想定のため、日別の専用一覧ページは持たず年タブに内包している。
+
+対局日詳細のデータ取得・描画（`src/routes/days.tsx`の`loadDayDetail` + `DayDetailBody`）は「当日」タブと`/days/:id`で共通利用している。新しい表示要素を足す場合は`DayDetailBody`側を触ればどちらにも反映される。
+
+`Layout`（`src/views/layout.tsx`）のナビは公開部分が「ホーム」のみで、タブ切り替えは各ページ内の`TabBar`コンポーネントが担う。管理者ログイン時は「対局日を開始」「対局日を終了」「プレイヤー管理」「ログアウト」がこの順で並ぶ。`extraHead`propでhead内に任意要素（自動更新用の`<meta http-equiv="refresh">`など）を差し込める。
+
+### デザイン
+
+麻雀感のある「今風」デザインへ刷新済み（`src/views/layout.tsx`のCSS）。背景は緑のフェルト風グラデーション、カードは生成り色のタイル風（角丸＋影）、アクセントカラーは金（`--gold`）。タブバーはピル型、アクティブタブは金背景。CSSカスタムプロパティ（`--felt`, `--tile`, `--gold`, `--plus`, `--minus`等）は`:root`で一括管理。
 
 **Honoの罠**: サブルーターに`.use("*", middleware)`を書いて`app.route("/", subApp)`でマウントすると、そのミドルウェアがアプリ全体（他のサブルーターのパスも含む）にかかってしまう。各ルートに個別で `requireAdmin` を渡す方式にしている（`playerRoutes.get("/players", requireAdmin, handler)`）。新しい管理者専用ルートを追加する際もこの書き方を踏襲すること。
 

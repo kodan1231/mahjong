@@ -1,15 +1,5 @@
 import type { FC, PropsWithChildren, Child } from "hono/jsx";
 
-const PUBLIC_NAV_LINKS = [
-  { href: "/", label: "ホーム" },
-  { href: "/days", label: "対局日一覧" },
-];
-
-const ADMIN_NAV_LINKS = [
-  { href: "/days/new", label: "対局日を開始" },
-  { href: "/players", label: "プレイヤー管理" },
-];
-
 export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean; extraHead?: Child }>> = ({
   title,
   isAdmin,
@@ -28,17 +18,19 @@ export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean; ext
     <body>
       <header class="app-header">
         <a class="brand" href="/">
-          麻雀スコア集計
+          <span class="brand-tile">🀄</span> 麻雀スコア集計
         </a>
         <nav class="app-nav">
-          {PUBLIC_NAV_LINKS.map((l) => (
-            <a href={l.href}>{l.label}</a>
-          ))}
+          <a href="/">ホーム</a>
           {isAdmin ? (
             <>
-              {ADMIN_NAV_LINKS.map((l) => (
-                <a href={l.href}>{l.label}</a>
-              ))}
+              <a href="/days/new">対局日を開始</a>
+              <form method="post" action="/days/close" class="inline-form">
+                <button type="submit" class="link-button">
+                  対局日を終了
+                </button>
+              </form>
+              <a href="/players">プレイヤー管理</a>
               <form method="post" action="/logout" class="inline-form">
                 <button type="submit" class="link-button">
                   ログアウト
@@ -56,48 +48,158 @@ export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean; ext
 );
 
 const css = `
-  :root { color-scheme: light dark; }
+  :root {
+    color-scheme: light;
+    --felt: #0b4a3a;
+    --felt-dark: #073226;
+    --tile: #faf6ec;
+    --tile-edge: #e8dfc8;
+    --ink: #23281f;
+    --ink-soft: #5b6357;
+    --gold: #c9a227;
+    --gold-dark: #a3801a;
+    --plus: #2f9e58;
+    --minus: #c0392b;
+  }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #f7f5f2;
-    color: #1f2933;
+    font-family: "Hiragino Sans", "Yu Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background:
+      radial-gradient(circle at 20% 20%, rgba(255,255,255,0.05) 0, transparent 40%),
+      radial-gradient(circle at 80% 60%, rgba(255,255,255,0.04) 0, transparent 45%),
+      linear-gradient(160deg, var(--felt) 0%, var(--felt-dark) 100%);
+    background-attachment: fixed;
+    color: var(--ink);
+    min-height: 100vh;
   }
   .app-header {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
-    background: #1f2933;
-    color: white;
+    gap: 8px;
+    padding: 14px 18px;
+    background: rgba(7, 50, 38, 0.92);
+    backdrop-filter: blur(4px);
+    border-bottom: 1px solid rgba(201, 162, 39, 0.35);
   }
-  .brand { color: white; font-weight: 700; text-decoration: none; font-size: 1.1rem; }
-  .app-nav { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-  .app-nav a, .link-button { color: #d7dee3; text-decoration: none; font-size: 0.9rem; background: none; border: none; padding: 0; cursor: pointer; }
+  .brand {
+    color: #fdf9ec;
+    font-weight: 800;
+    text-decoration: none;
+    font-size: 1.15rem;
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .brand-tile { font-size: 1.3rem; }
+  .app-nav { display: flex; gap: 4px 14px; flex-wrap: wrap; align-items: center; }
+  .app-nav a, .link-button {
+    color: #e8f2ec;
+    text-decoration: none;
+    font-size: 0.88rem;
+    font-weight: 600;
+    background: none;
+    border: none;
+    padding: 4px 2px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  .app-nav a:hover, .link-button:hover { border-bottom-color: var(--gold); }
   .inline-form { display: inline; }
-  .app-main { max-width: 720px; margin: 0 auto; padding: 16px; }
-  h1 { font-size: 1.3rem; }
-  h2 { font-size: 1.1rem; margin-top: 1.5em; }
-  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-  th, td { padding: 8px; border-bottom: 1px solid #ddd; text-align: right; font-variant-numeric: tabular-nums; }
-  th:first-child, td:first-child { text-align: left; }
-  .card { background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-  .btn { display: inline-block; padding: 10px 16px; border-radius: 6px; background: #2563eb; color: white; text-decoration: none; border: none; font-size: 1rem; cursor: pointer; }
-  .btn-secondary { background: #6b7280; }
-  .btn-danger { background: #dc2626; }
-  form.stack { display: flex; flex-direction: column; gap: 10px; max-width: 420px; }
-  label { font-size: 0.9rem; font-weight: 600; }
-  input[type=text], input[type=password], input[type=number], select, textarea {
-    padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 1rem; width: 100%;
+  .app-main { max-width: 760px; margin: 0 auto; padding: 18px 16px 48px; }
+
+  h1 { font-size: 1.4rem; color: #fdf9ec; margin: 4px 0 14px; letter-spacing: 0.01em; }
+  h2 { font-size: 1.05rem; margin-top: 1.6em; color: var(--ink); }
+  h3 { font-size: 1rem; }
+
+  .tab-bar {
+    display: flex;
+    gap: 4px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(201, 162, 39, 0.4);
+    border-radius: 999px;
+    padding: 4px;
+    margin-bottom: 18px;
   }
-  .seat-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
-  .seat-row .seat-label { width: 4em; font-weight: 600; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; background: #e5e7eb; }
-  .badge-pending { background: #fef3c7; color: #92400e; }
-  .badge-confirmed { background: #d1fae5; color: #065f46; }
-  .warning { color: #b45309; background: #fffbeb; border: 1px solid #fcd34d; padding: 8px 12px; border-radius: 6px; }
-  .plus { color: #047857; }
-  .minus { color: #b91c1c; }
+  .tab {
+    flex: 1;
+    text-align: center;
+    padding: 9px 6px;
+    border-radius: 999px;
+    color: #e8f2ec;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 0.92rem;
+  }
+  .tab.active { background: var(--gold); color: #2a2306; }
+
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+  th, td { padding: 9px 6px; border-bottom: 1px solid var(--tile-edge); text-align: right; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink-soft); font-weight: 600; font-size: 0.85rem; }
+
+  .card {
+    background: var(--tile);
+    border: 1px solid var(--tile-edge);
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 16px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+  }
+  .card h2:first-child, .card h3:first-child { margin-top: 0; }
+
+  .btn {
+    display: inline-block;
+    padding: 11px 18px;
+    border-radius: 999px;
+    background: var(--gold);
+    color: #2a2306;
+    text-decoration: none;
+    border: none;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .btn:hover { background: var(--gold-dark); }
+  .btn-secondary { background: var(--felt); color: #fdf9ec; }
+  .btn-secondary:hover { background: var(--felt-dark); }
+  .btn-danger { background: var(--minus); color: white; }
+
+  form.stack { display: flex; flex-direction: column; gap: 10px; max-width: 440px; }
+  label { font-size: 0.88rem; font-weight: 700; color: var(--ink); }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    padding: 10px; border-radius: 8px; border: 1px solid var(--tile-edge); font-size: 1rem; width: 100%;
+    background: white; color: var(--ink);
+  }
+  input:focus, select:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+  .seat-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .seat-row .seat-label { width: 4em; font-weight: 700; color: var(--ink-soft); flex-shrink: 0; }
+  .seat-row select { flex: 1 1 8em; }
+  .seat-row input[type=number] { flex: 1 1 6em; }
+
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; background: #e5e7df; color: var(--ink-soft); }
+  .badge-pending { background: #fdeecb; color: #92600e; }
+  .badge-confirmed { background: #d9efe1; color: #1c6b41; }
+  .badge-open { background: #fdeecb; color: #92600e; }
+  .badge-closed { background: #e5e7df; color: var(--ink-soft); }
+
+  .warning { color: #7a4a0e; background: #fdeecb; border: 1px solid #e8c66a; padding: 9px 14px; border-radius: 10px; }
+  .plus { color: var(--plus); font-weight: 700; }
+  .minus { color: var(--minus); font-weight: 700; }
+
+  a { color: #0d5c3f; }
+  .card a { color: #0d5c3f; }
+  .app-main > p > a, .card > p > a { text-decoration: none; font-weight: 600; }
+
+  details summary { cursor: pointer; font-weight: 700; color: var(--ink); margin-top: 12px; }
+
+  @media (max-width: 480px) {
+    .app-header { padding: 12px 14px; }
+    .card { padding: 14px; }
+    .tab { font-size: 0.85rem; padding: 8px 4px; }
+  }
 `;

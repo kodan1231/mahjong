@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { eq, and, desc, asc, inArray } from "drizzle-orm";
 import type { Env } from "../types";
-import { getDb } from "../db/client";
+import { getDb, type Db } from "../db/client";
 import {
   players,
   days,
@@ -14,196 +14,18 @@ import {
   photoUploads,
 } from "../db/schema";
 import { Layout } from "../views/layout";
-import { Signed } from "../views/components";
+import { Signed, TotalsTable, TabBar } from "../views/components";
 import { requireAdmin, isAdmin } from "../lib/auth";
 import { computeRankAndChips, normalizeRawScore, ORIGIN_SCORE, type DisplayMode } from "../lib/scoring";
-import { computeTotals, computeDaySummary, yearRange } from "../lib/aggregate";
+import { computeDaySummary } from "../lib/aggregate";
 
 export const dayRoutes = new Hono<{ Bindings: Env }>();
 
-// ---------- ダッシュボード ----------
+// ---------- 対局日詳細（当日タブ・履歴ドリルダウン共通のデータ取得＆表示） ----------
 
-dayRoutes.get("/", async (c) => {
-  const db = getDb(c.env);
-  const admin = await isAdmin(c);
-  const year = new Date().getFullYear();
-
-  const [yearTotals, overallTotals, recentDays] = await Promise.all([
-    computeTotals(db, yearRange(year)),
-    computeTotals(db),
-    db.select().from(days).orderBy(desc(days.date)).limit(10),
-  ]);
-
-  return c.html(
-    <Layout title="ホーム" isAdmin={admin}>
-      <h1>麻雀スコア集計</h1>
-
-      <div class="card">
-        <h2 style="margin-top:0">{year}年 合計</h2>
-        <TotalsTable totals={yearTotals} />
-        <p>
-          <a href={`/stats/${year}`}>年間集計ページを見る →</a>
-        </p>
-      </div>
-
-      <div class="card">
-        <h2 style="margin-top:0">通算合計</h2>
-        <TotalsTable totals={overallTotals} />
-      </div>
-
-      <div class="card">
-        <h2 style="margin-top:0">直近の対局日</h2>
-        {recentDays.length === 0 && <p>まだ対局日がありません。</p>}
-        <ul>
-          {recentDays.map((d) => (
-            <li>
-              <a href={`/days/${d.id}`}>
-                {d.date} {d.memo ? `(${d.memo})` : ""}
-              </a>
-            </li>
-          ))}
-        </ul>
-        <p>
-          <a href="/days">すべての対局日を見る →</a>
-        </p>
-        {admin && (
-          <p>
-            <a class="btn" href="/days/new">
-              対局日を開始
-            </a>
-          </p>
-        )}
-      </div>
-    </Layout>,
-  );
-});
-
-const TotalsTable = ({
-  totals,
-}: {
-  totals: { playerId: number; name: string; rawTotal: number; chipTotal: number }[];
-}) => (
-  <table>
-    <thead>
-      <tr>
-        <th>プレイヤー</th>
-        <th>素点合計</th>
-        <th>チップ合計</th>
-      </tr>
-    </thead>
-    <tbody>
-      {totals.map((t) => (
-        <tr>
-          <td>
-            <a href={`/players/${t.playerId}`}>{t.name}</a>
-          </td>
-          <td>
-            <Signed n={t.rawTotal} />
-          </td>
-          <td>
-            <Signed n={t.chipTotal} />
-          </td>
-        </tr>
-      ))}
-    </tbody>
-  </table>
-);
-
-// ---------- 対局日 ----------
-
-dayRoutes.get("/days", async (c) => {
-  const db = getDb(c.env);
-  const admin = await isAdmin(c);
-  const allDays = await db.select().from(days).orderBy(desc(days.date));
-
-  const byYear = new Map<string, typeof allDays>();
-  for (const d of allDays) {
-    const year = d.date.slice(0, 4);
-    const list = byYear.get(year) ?? [];
-    list.push(d);
-    byYear.set(year, list);
-  }
-  const years = [...byYear.keys()].sort((a, b) => b.localeCompare(a));
-
-  return c.html(
-    <Layout title="対局日一覧" isAdmin={admin}>
-      <h1>対局日一覧</h1>
-      {allDays.length === 0 && <p>まだ対局日がありません。</p>}
-      {years.map((year) => (
-        <div class="card">
-          <h2 style="margin-top:0">{year}年</h2>
-          <ul>
-            {byYear.get(year)!.map((d) => (
-              <li>
-                <a href={`/days/${d.id}`}>
-                  {d.date} {d.memo ? `(${d.memo})` : ""}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </Layout>,
-  );
-});
-
-dayRoutes.get("/days/new", requireAdmin, async (c) => {
-  const db = getDb(c.env);
-  const activePlayers = await db.select().from(players).where(eq(players.active, true));
-  const today = new Date().toISOString().slice(0, 10);
-
-  return c.html(
-    <Layout title="対局日を開始" isAdmin={true}>
-      <h1>対局日を開始</h1>
-      <form class="stack" method="post" action="/days">
-        <label for="date">日付</label>
-        <input type="text" id="date" name="date" value={today} required />
-
-        <label for="memo">メモ（任意）</label>
-        <input type="text" id="memo" name="memo" />
-
-        <label>今日の参加者</label>
-        {activePlayers.map((p) => (
-          <label style="font-weight:normal">
-            <input type="checkbox" name="playerIds" value={p.id} /> {p.name}
-          </label>
-        ))}
-
-        <button class="btn" type="submit">
-          開始する
-        </button>
-      </form>
-    </Layout>,
-  );
-});
-
-dayRoutes.post("/days", requireAdmin, async (c) => {
-  const db = getDb(c.env);
-  const body = await c.req.parseBody({ all: true });
-  const date = String(body.date ?? "").trim();
-  const memo = body.memo ? String(body.memo) : null;
-  const playerIdsRaw = body.playerIds;
-  const playerIds = (Array.isArray(playerIdsRaw) ? playerIdsRaw : playerIdsRaw ? [playerIdsRaw] : []).map(Number);
-
-  if (!date || playerIds.length === 0) {
-    return c.redirect("/days/new");
-  }
-
-  const [day] = await db.insert(days).values({ date, memo }).returning({ id: days.id });
-  if (day) {
-    await db.insert(dayParticipants).values(playerIds.map((playerId) => ({ dayId: day.id, playerId })));
-  }
-
-  return c.redirect(`/days/${day?.id}`);
-});
-
-dayRoutes.get("/days/:id", async (c) => {
-  const dayId = Number(c.req.param("id"));
-  const db = getDb(c.env);
-  const admin = await isAdmin(c);
-
+async function loadDayDetail(db: Db, dayId: number) {
   const [day] = await db.select().from(days).where(eq(days.id, dayId));
-  if (!day) return c.notFound();
+  if (!day) return null;
 
   const participants = await db
     .select({ playerId: players.id, name: players.name })
@@ -260,47 +82,52 @@ dayRoutes.get("/days/:id", async (c) => {
     : [];
 
   const daySummary = await computeDaySummary(db, dayId);
-  const autoRefresh = c.req.query("autorefresh") === "1";
 
-  return c.html(
-    <Layout
-      title={`${day.date} の対局`}
-      isAdmin={admin}
-      extraHead={autoRefresh ? <meta http-equiv="refresh" content={`20;url=/days/${dayId}?autorefresh=1`} /> : undefined}
-    >
-      <h1>
-        {day.date} {day.memo ? `(${day.memo})` : ""}
-      </h1>
-      <p>参加者: {participants.map((p) => p.name).join(" / ")}</p>
+  return { day, participants, sessions, allScores, allHands, events, allTargets, daySummary };
+}
+
+type DayDetail = NonNullable<Awaited<ReturnType<typeof loadDayDetail>>>;
+
+const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; data: DayDetail }) => {
+  const { day, participants, sessions, allScores, allHands, events, allTargets, daySummary } = data;
+
+  return (
+    <>
       <p>
-        {autoRefresh ? (
-          <a href={`/days/${dayId}`}>自動更新を止める</a>
-        ) : (
-          <a href={`/days/${dayId}?autorefresh=1`}>自動更新ON（20秒ごと。みんなで見る用）</a>
-        )}
-        {admin && (
-          <>
-            {" / "}
-            <a href={`/days/${dayId}/edit`}>この対局日を編集する</a>
-          </>
-        )}
+        参加者: {participants.map((p) => p.name).join(" / ")}{" "}
+        <span class={`badge ${day.status === "open" ? "badge-open" : "badge-closed"}`}>
+          {day.status === "open" ? "対局中" : "終了"}
+        </span>
       </p>
+      {admin && (
+        <p>
+          <a href={`/days/${dayId}/edit`}>この対局日を編集する</a>
+          {day.status === "open" && (
+            <>
+              {" / "}
+              <form class="inline-form" method="post" action="/days/close">
+                <button class="link-button" type="submit">
+                  この対局日を終了する
+                </button>
+              </form>
+            </>
+          )}
+        </p>
+      )}
 
       <div class="card">
-        <h2 style="margin-top:0">この日の小計</h2>
+        <h2>この日の小計</h2>
         <TotalsTable totals={daySummary} />
       </div>
 
       <h2>半荘一覧</h2>
       {sessions.length === 0 && <p>まだ半荘がありません。</p>}
       {sessions.map((s) => {
-        const rows = allScores
-          .filter((r) => r.gameSessionId === s.id)
-          .sort((a, b) => a.seatIndex - b.seatIndex);
+        const rows = allScores.filter((r) => r.gameSessionId === s.id).sort((a, b) => a.seatIndex - b.seatIndex);
         const hands = allHands.filter((h) => h.gameSessionId === s.id);
         return (
           <div class="card">
-            <h3 style="margin-top:0">
+            <h3>
               第{s.seq}半荘{" "}
               <span class={`badge ${s.status === "confirmed" ? "badge-confirmed" : "badge-pending"}`}>
                 {s.status === "confirmed" ? "確定済み" : "撮影待ち"}
@@ -374,7 +201,7 @@ dayRoutes.get("/days/:id", async (c) => {
                   action={`/days/${dayId}/sessions/${s.id}/delete`}
                   onsubmit="return confirm('この半荘を削除します。よろしいですか？')"
                 >
-                  <button class="link-button" type="submit" style="color:#b91c1c">
+                  <button class="link-button" type="submit" style="color:#c0392b">
                     この半荘を削除
                   </button>
                 </form>
@@ -471,6 +298,170 @@ dayRoutes.get("/days/:id", async (c) => {
           </form>
         </details>
       )}
+    </>
+  );
+};
+
+// ---------- 当日タブ ----------
+
+dayRoutes.get("/", async (c) => {
+  const db = getDb(c.env);
+  const admin = await isAdmin(c);
+
+  const [openDay] = await db.select().from(days).where(eq(days.status, "open"));
+
+  if (!openDay) {
+    return c.html(
+      <Layout title="当日の成績" isAdmin={admin}>
+        <TabBar active="today" />
+        <h1>当日の成績</h1>
+        <div class="card">
+          <p>現在進行中の対局日はありません。</p>
+          {admin && (
+            <p>
+              <a class="btn" href="/days/new">
+                対局日を開始
+              </a>
+            </p>
+          )}
+        </div>
+      </Layout>,
+    );
+  }
+
+  const data = await loadDayDetail(db, openDay.id);
+  if (!data) return c.notFound();
+
+  return c.html(
+    <Layout title="当日の成績" isAdmin={admin}>
+      <TabBar active="today" />
+      <h1>
+        当日の成績{" "}
+        <small style="font-size:0.6em; color:var(--ink-soft)">
+          （{data.day.date}
+          {data.day.memo ? ` ${data.day.memo}` : ""}）
+        </small>
+      </h1>
+      <DayDetailBody dayId={openDay.id} admin={admin} data={data} />
+    </Layout>,
+  );
+});
+
+// ---------- 対局日 ----------
+
+dayRoutes.get("/days/new", requireAdmin, async (c) => {
+  const db = getDb(c.env);
+
+  const [openDay] = await db.select().from(days).where(eq(days.status, "open"));
+  if (openDay) {
+    return c.html(
+      <Layout title="対局日を開始" isAdmin={true}>
+        <h1>対局日を開始</h1>
+        <p class="warning">既に進行中の対局日があります（{openDay.date}）。先に終了してから開始してください。</p>
+        <p>
+          <a class="btn" href={`/days/${openDay.id}`}>
+            進行中の対局日を見る
+          </a>
+        </p>
+      </Layout>,
+    );
+  }
+
+  const activePlayers = await db.select().from(players).where(eq(players.active, true));
+  const today = new Date().toISOString().slice(0, 10);
+
+  return c.html(
+    <Layout title="対局日を開始" isAdmin={true}>
+      <h1>対局日を開始</h1>
+      <form class="stack" method="post" action="/days">
+        <label for="date">日付</label>
+        <input type="text" id="date" name="date" value={today} required />
+
+        <label for="memo">メモ（任意）</label>
+        <input type="text" id="memo" name="memo" />
+
+        <label>今日の参加者</label>
+        {activePlayers.map((p) => (
+          <label style="font-weight:normal">
+            <input type="checkbox" name="playerIds" value={p.id} /> {p.name}
+          </label>
+        ))}
+
+        <button class="btn" type="submit">
+          開始する
+        </button>
+      </form>
+    </Layout>,
+  );
+});
+
+dayRoutes.post("/days", requireAdmin, async (c) => {
+  const db = getDb(c.env);
+
+  const [openDay] = await db.select().from(days).where(eq(days.status, "open"));
+  if (openDay) return c.redirect(`/days/${openDay.id}`);
+
+  const body = await c.req.parseBody({ all: true });
+  const date = String(body.date ?? "").trim();
+  const memo = body.memo ? String(body.memo) : null;
+  const playerIdsRaw = body.playerIds;
+  const playerIds = (Array.isArray(playerIdsRaw) ? playerIdsRaw : playerIdsRaw ? [playerIdsRaw] : []).map(Number);
+
+  if (!date || playerIds.length === 0) {
+    return c.redirect("/days/new");
+  }
+
+  const [day] = await db.insert(days).values({ date, memo }).returning({ id: days.id });
+  if (day) {
+    await db.insert(dayParticipants).values(playerIds.map((playerId) => ({ dayId: day.id, playerId })));
+  }
+
+  return c.redirect(`/days/${day?.id}`);
+});
+
+dayRoutes.post("/days/close", requireAdmin, async (c) => {
+  const db = getDb(c.env);
+  const [openDay] = await db.select().from(days).where(eq(days.status, "open"));
+
+  if (openDay) {
+    await db.update(days).set({ status: "closed" }).where(eq(days.id, openDay.id));
+    return c.redirect(`/days/${openDay.id}`);
+  }
+
+  return c.redirect("/");
+});
+
+dayRoutes.get("/days/:id", async (c) => {
+  const dayId = Number(c.req.param("id"));
+  const db = getDb(c.env);
+  const admin = await isAdmin(c);
+
+  const data = await loadDayDetail(db, dayId);
+  if (!data) return c.notFound();
+
+  const autoRefresh = c.req.query("autorefresh") === "1";
+  const year = Number(data.day.date.slice(0, 4));
+
+  return c.html(
+    <Layout
+      title={`${data.day.date} の対局`}
+      isAdmin={admin}
+      extraHead={autoRefresh ? <meta http-equiv="refresh" content={`20;url=/days/${dayId}?autorefresh=1`} /> : undefined}
+    >
+      <p>
+        <a href={`/years/${year}`}>← {year}年の一覧に戻る</a>
+      </p>
+      <h1>
+        {data.day.date} {data.day.memo ? `(${data.day.memo})` : ""}
+      </h1>
+      <p>
+        {autoRefresh ? (
+          <a href={`/days/${dayId}`}>自動更新を止める</a>
+        ) : (
+          <a href={`/days/${dayId}?autorefresh=1`}>自動更新ON（20秒ごと。みんなで見る用）</a>
+        )}
+      </p>
+      <DayDetailBody dayId={dayId} admin={admin} data={data} />
     </Layout>,
   );
 });

@@ -1,10 +1,10 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
+import { eq, and, gte, lt, desc } from "drizzle-orm";
 import type { Env } from "../types";
 import { getDb } from "../db/client";
-import { players } from "../db/schema";
+import { players, days } from "../db/schema";
 import { Layout } from "../views/layout";
-import { Signed, Sparkline } from "../views/components";
+import { Signed, Sparkline, TotalsTable, TabBar } from "../views/components";
 import { isAdmin } from "../lib/auth";
 import {
   computeTotals,
@@ -17,47 +17,72 @@ import {
 
 export const statsRoutes = new Hono<{ Bindings: Env }>();
 
-statsRoutes.get("/stats/:year", async (c) => {
+// ---------- 年度別タブ ----------
+
+statsRoutes.get("/years/:year", async (c) => {
   const year = Number(c.req.param("year"));
   const db = getDb(c.env);
   const admin = await isAdmin(c);
-  const totals = await computeTotals(db, yearRange(year));
+
+  const range = yearRange(year);
+  const [totals, daysInYear] = await Promise.all([
+    computeTotals(db, range),
+    db
+      .select()
+      .from(days)
+      .where(and(eq(days.status, "closed"), gte(days.date, range.from!), lt(days.date, range.to!)))
+      .orderBy(desc(days.date)),
+  ]);
 
   return c.html(
-    <Layout title={`${year}年 集計`} isAdmin={admin}>
-      <h1>{year}年 集計</h1>
-      <div class="card">
-        <table>
-          <thead>
-            <tr>
-              <th>プレイヤー</th>
-              <th>素点合計</th>
-              <th>チップ合計</th>
-            </tr>
-          </thead>
-          <tbody>
-            {totals.map((t) => (
-              <tr>
-                <td>
-                  <a href={`/players/${t.playerId}`}>{t.name}</a>
-                </td>
-                <td>
-                  <Signed n={t.rawTotal} />
-                </td>
-                <td>
-                  <Signed n={t.chipTotal} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <Layout title={`${year}年の成績`} isAdmin={admin}>
+      <TabBar active="year" year={year} />
+      <h1>{year}年の成績</h1>
       <p>
-        <a href={`/stats/${year - 1}`}>← {year - 1}年</a> / <a href={`/stats/${year + 1}`}>{year + 1}年 →</a>
+        <a href={`/years/${year - 1}`}>← {year - 1}年</a> ／ <a href={`/years/${year + 1}`}>{year + 1}年 →</a>
       </p>
+
+      <div class="card">
+        <h2>合計</h2>
+        <TotalsTable totals={totals} />
+      </div>
+
+      <div class="card">
+        <h2>対局日一覧</h2>
+        {daysInYear.length === 0 && <p>この年の対局日（終了済み）はまだありません。</p>}
+        <ul>
+          {daysInYear.map((d) => (
+            <li>
+              <a href={`/days/${d.id}`}>
+                {d.date} {d.memo ? `(${d.memo})` : ""}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
     </Layout>,
   );
 });
+
+// ---------- 通算タブ ----------
+
+statsRoutes.get("/overall", async (c) => {
+  const db = getDb(c.env);
+  const admin = await isAdmin(c);
+  const totals = await computeTotals(db);
+
+  return c.html(
+    <Layout title="通算成績" isAdmin={admin}>
+      <TabBar active="overall" />
+      <h1>通算成績</h1>
+      <div class="card">
+        <TotalsTable totals={totals} />
+      </div>
+    </Layout>,
+  );
+});
+
+// ---------- 個人ページ ----------
 
 statsRoutes.get("/players/:id", async (c) => {
   const playerId = Number(c.req.param("id"));
@@ -82,7 +107,7 @@ statsRoutes.get("/players/:id", async (c) => {
       <h1>{player.name} の成績</h1>
 
       <div class="card">
-        <h2 style="margin-top:0">通算</h2>
+        <h2>通算</h2>
         <p>
           素点合計: <Signed n={mine?.rawTotal ?? 0} /> ／ チップ合計: <Signed n={mine?.chipTotal ?? 0} /> ／ 半荘数:{" "}
           {gameCount}
@@ -91,7 +116,7 @@ statsRoutes.get("/players/:id", async (c) => {
       </div>
 
       <div class="card">
-        <h2 style="margin-top:0">年別</h2>
+        <h2>年別</h2>
         {yearly.length === 0 && <p>まだ対局記録がありません。</p>}
         {yearly.length > 0 && (
           <table>
@@ -106,7 +131,7 @@ statsRoutes.get("/players/:id", async (c) => {
               {[...yearly].reverse().map((y) => (
                 <tr>
                   <td>
-                    <a href={`/stats/${y.year}`}>{y.year}年</a>
+                    <a href={`/years/${y.year}`}>{y.year}年</a>
                   </td>
                   <td>
                     <Signed n={y.rawTotal} />
@@ -122,7 +147,7 @@ statsRoutes.get("/players/:id", async (c) => {
       </div>
 
       <div class="card">
-        <h2 style="margin-top:0">着順分布</h2>
+        <h2>着順分布</h2>
         <table>
           <thead>
             <tr>
@@ -142,7 +167,7 @@ statsRoutes.get("/players/:id", async (c) => {
       </div>
 
       <div class="card">
-        <h2 style="margin-top:0">役満（{yakumanWins.length}回）</h2>
+        <h2>役満（{yakumanWins.length}回）</h2>
         {yakumanWins.length === 0 && <p>まだありません。</p>}
         <ul>
           {yakumanWins.map((y) => (

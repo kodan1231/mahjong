@@ -6,6 +6,57 @@ export const Signed = ({ n, unit = "" }: { n: number; unit?: string }) => (
   </span>
 );
 
+export const TotalsTable = ({
+  totals,
+}: {
+  totals: { playerId: number; name: string; rawTotal: number; chipTotal: number }[];
+}) => (
+  <table>
+    <thead>
+      <tr>
+        <th>プレイヤー</th>
+        <th>素点合計</th>
+        <th>チップ合計</th>
+      </tr>
+    </thead>
+    <tbody>
+      {totals.map((t) => (
+        <tr>
+          <td>
+            <a href={`/players/${t.playerId}`}>{t.name}</a>
+          </td>
+          <td>
+            <Signed n={t.rawTotal} />
+          </td>
+          <td>
+            <Signed n={t.chipTotal} />
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+);
+
+export type TabKey = "today" | "year" | "overall";
+
+/** トップ画面の3タブ（当日 / 年度別 / 通算）。年度別タブのリンク先は指定年（省略時は今年）。 */
+export const TabBar = ({ active, year }: { active: TabKey; year?: number }) => {
+  const targetYear = year ?? new Date().getFullYear();
+  return (
+    <nav class="tab-bar">
+      <a href="/" class={`tab${active === "today" ? " active" : ""}`}>
+        当日
+      </a>
+      <a href={`/years/${targetYear}`} class={`tab${active === "year" ? " active" : ""}`}>
+        年度別
+      </a>
+      <a href="/overall" class={`tab${active === "overall" ? " active" : ""}`}>
+        通算
+      </a>
+    </nav>
+  );
+};
+
 /** 数値の推移を表すシンプルな折れ線グラフ（追加ライブラリ不要、サーバー側でSVGを生成する）。 */
 export const Sparkline = ({ points }: { points: number[] }) => {
   if (points.length < 2) return <p>グラフを表示するにはデータが足りません。</p>;

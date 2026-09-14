@@ -1,0 +1,1 @@
+ALTER TABLE `days` ADD `status` text DEFAULT 'open' NOT NULL;

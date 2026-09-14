@@ -1508,9 +1508,12 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
 
     const blockName = label || `${idx}番目の小計ブロック`;
 
-    if (incomplete || pointEntries.length !== 4) {
+    // 小計ブロックは半荘ごとの座席（常に4人）とは違い、その期間に実際に参加した人数分
+    // （日の参加者のうち何人でも）を対象にできる。入力した人は全員ポイント・チップの
+    // 両方が必要（片方だけの入力を防ぐ）だが、人数そのものは4人固定にしない。
+    if (incomplete) {
       subtotalWarnings.push(
-        `「${blockName}」は4人分のポイント・チップが揃っていないため保存されませんでした。`,
+        `「${blockName}」はポイント・チップの片方だけ入力された参加者がいるため保存されませんでした。両方とも入力してください。`,
       );
       continue;
     }

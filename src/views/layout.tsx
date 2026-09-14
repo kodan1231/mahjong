@@ -27,9 +27,9 @@ export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean; ext
           <span class="brand-tile">🀄</span> 麻雀スコア集計
         </a>
         <nav class="app-nav">
-          <a href="/">ホーム</a>
           {isAdmin ? (
             <>
+              <a href="/">ホーム</a>
               <a href="/days/new">対局日を開始</a>
               <form method="post" action="/days/close" class="inline-form">
                 <button type="submit" class="link-button">
@@ -173,6 +173,10 @@ const css = `
   th:first-child, td:first-child { text-align: left; }
   th { color: var(--ink-soft); font-weight: 600; font-size: 0.78rem; }
 
+  /* 半荘一覧・小計ブロックの各カード内の表は、一覧系テーブルより文字を大きめにする */
+  .session-table td { font-size: 1.15rem; }
+  .session-table th { font-size: 0.85rem; }
+
   .card {
     background: var(--tile);
     border: 1px solid var(--tile-edge);
@@ -299,6 +303,9 @@ const css = `
     background: transparent;
   }
   .sheet-table input[type=number]:focus { background: #fff6d6; outline: 2px solid var(--gold); outline-offset: -2px; }
+
+  /* 小計ブロック入力欄は参加者名・ポイント/チップ欄をまとめて入力の表より少し大きめにする */
+  .subtotal-block { font-size: 1.1rem; }
 
   @media (max-width: 480px) {
     .app-header { padding: 12px 14px; }

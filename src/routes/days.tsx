@@ -100,26 +100,19 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
 
   return (
     <>
-      <p>
+      <p style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:-4px">
         <span class={`badge ${day.status === "open" ? "badge-open" : "badge-closed"}`}>
           {day.status === "open" ? "対局中" : "終了"}
         </span>
+        {admin && <a href={`/days/${dayId}/edit`}>編集</a>}
+        {admin && day.status === "open" && (
+          <form class="inline-form" method="post" action="/days/close">
+            <button class="link-button" type="submit">
+              終了する
+            </button>
+          </form>
+        )}
       </p>
-      {admin && (
-        <p>
-          <a href={`/days/${dayId}/edit`}>この対局日を編集する</a>
-          {day.status === "open" && (
-            <>
-              {" / "}
-              <form class="inline-form" method="post" action="/days/close">
-                <button class="link-button" type="submit">
-                  この対局日を終了する
-                </button>
-              </form>
-            </>
-          )}
-        </p>
-      )}
 
       <div class="card">
         <h2>この日の小計</h2>
@@ -143,7 +136,7 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
                 {s.status === "confirmed" ? "確定済み" : "撮影待ち"}
               </span>
             </h3>
-            <table>
+            <table class="session-table">
               <thead>
                 <tr>
                   <th>プレイヤー</th>
@@ -263,10 +256,10 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
       {admin && (
         <p style="display:flex; gap:10px; flex-wrap:wrap">
           <a class="btn" href={`/days/${dayId}/sessions/new`}>
-            次の半荘を登録
+            次の半荘
           </a>
           <a class="btn btn-secondary" href={`/days/${dayId}/sheet`}>
-            まとめて入力する
+            まとめて入力
           </a>
         </p>
       )}
@@ -1351,6 +1344,26 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
     .orderBy(asc(gameSessions.seq));
   const sessionBySeq = new Map(existingSessions.map((s) => [s.seq, s]));
 
+  // 小計ブロックとして既に登録済みのセッションは、通常の半荘行の処理（4人固定・自動着順計算）を
+  // 一切適用してはいけない（人数が4人と限らず、チップも手入力値をそのまま使うため）。
+  // 「rank===null かつ rankChip!==null」の組み合わせが小計ブロックの目印。
+  const existingSessionIds = existingSessions.map((s) => s.id);
+  const existingScores = existingSessionIds.length
+    ? await db.select().from(sessionScores).where(inArray(sessionScores.gameSessionId, existingSessionIds))
+    : [];
+  const subtotalSessionIds = new Set(
+    existingSessions
+      .filter((s) => {
+        const rows = existingScores.filter((r) => r.gameSessionId === s.id);
+        return rows.length > 0 && rows.every((r) => r.rank == null) && rows.some((r) => r.rankChip != null);
+      })
+      .map((s) => s.id),
+  );
+  // 小計ブロックの新規追加分は、表示用の空行(SHEET_EXTRA_BLANK_ROWS)を含まない
+  // 「実際に登録済みの最後の回」の直後に採番する（末尾の空行の後ろに付けてしまうと、
+  // 空行がどんどん後ろへ伸び続けてしまうため）。通常行の処理中にも更新する。
+  let highestRealSeq = existingSessions.reduce((m, s) => Math.max(m, s.seq), 0);
+
   const body = await c.req.parseBody();
   const acceptTies = body.acceptTies === "1";
 
@@ -1377,6 +1390,16 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
   const badSumSeqs: number[] = [];
 
   for (let seq = 1; seq <= maxSeq; seq++) {
+    const existingSessionForSeq = sessionBySeq.get(seq);
+    if (existingSessionForSeq && subtotalSessionIds.has(existingSessionForSeq.id)) {
+      // 小計ブロックの行はまとめて入力の表にも数値がプリフィルされて表示されるが、
+      // ここで通常の半荘行として再処理（4人固定・自動着順計算）してしまうと、
+      // 5人以上の小計が「4人分そろっていない」エラー扱いになったり、手入力した
+      // チップ値が自動計算で上書きされたりする。既存の小計ブロックはここでは一切触らない。
+      highestRealSeq = Math.max(highestRealSeq, seq);
+      continue;
+    }
+
     const entries: { playerId: number; rawScore: number }[] = [];
     for (const playerId of participantIds) {
       const raw = body[`score_${seq}_${playerId}`];
@@ -1403,6 +1426,7 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
 
     if (hasTie && !acceptTies) {
       tiedSeqs.push(seq);
+      highestRealSeq = Math.max(highestRealSeq, seq);
       // 着順・チップは確定しないが、入力値は失わないよう pending として保存しておく
       let session = existingSession;
       if (!session) {
@@ -1425,6 +1449,8 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
       );
       continue;
     }
+
+    highestRealSeq = Math.max(highestRealSeq, seq);
 
     let session = existingSession;
     if (!session) {
@@ -1460,8 +1486,8 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
   // ---------- 小計ブロック（半荘ごとの内訳が分からない期間のポイント・チップを直接入力する） ----------
   // 通常行と違い着順・チップは自動計算せず、入力されたチップ値をそのまま rankChip に保存する
   // （rankは常にnull。「rank===null かつ rankChip!==null」がこの小計ブロックの目印になる）。
-  // seqは通常行の続き番号から採番する（半荘一覧の末尾に並ぶ。前半だけ小計にした場合でも
-  // 表示順は末尾になる点に注意。詳細はCLAUDE.md参照）。
+  // seqは「実際に登録済みの最後の回」(highestRealSeq)の直後に採番する（末尾の空行8つの
+  // 後ろに付けてしまうと、次回以降の表示でその分だけ空行が伸び続けてしまうため）。
   let maxBlockIdx = 0;
   for (const key of Object.keys(body)) {
     const m = key.match(/^subtotal_(?:label|point|chip)_(\d+)/);
@@ -1471,7 +1497,7 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
 
   const subtotalOverrides = new Map<string, string>();
   const subtotalWarnings: string[] = [];
-  let nextSeq = maxSeq + 1;
+  let nextSeq = highestRealSeq + 1;
 
   for (let idx = 1; idx <= maxBlockIdx; idx++) {
     const labelRaw = body[`subtotal_label_${idx}`];

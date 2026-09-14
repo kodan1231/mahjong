@@ -69,6 +69,13 @@ Cloudflare Workers + D1 + R2 + Workers AI (Hono) で構築。詳細なセット�
 
 **Honoの罠**: サブルーターに`.use("*", middleware)`を書いて`app.route("/", subApp)`でマウントすると、そのミドルウェアがアプリ全体（他のサブルーターのパスも含む）にかかってしまう。各ルートに個別で `requireAdmin` を渡す方式にしている（`playerRoutes.get("/players", requireAdmin, handler)`）。新しい管理者専用ルートを追加する際もこの書き方を踏襲すること。
 
+## 既知の運用上の懸念
+
+- **役満チップが遡及的に変わりうる**: `computeYakumanChips`はイベント発生時点ではなく、集計時点の`day_participants`を都度参照して計算する。`/days/:id/edit`で後から参加者を編集すると、過去の役満チップの集計結果も変わる（イベント側にスナップショットを保存していないため）。直す場合は`yakuman_events`にその時点の対象プレイヤーIDリストを保存する設計変更が必要
+- **OCR精度は実機未検証**: 実際の点数表示機の写真でのテストがまだできていない。当面は「OCR結果を確認して手直しする」運用が前提
+- **共有パスワードにレート制限なし**: 閲覧は認証不要でURLが広まりやすい設計のため、ログインへの総当たりを防ぐ仕組みは未実装
+- **ダッシュボードの「今年」判定はサーバー(UTC)時刻基準**: 日本時間の大晦日〜元日をまたぐ対局で、トップページの年別集計の初期表示がずれる可能性がある（`/stats/:year`で明示的に年を指定すれば正しく見られる）
+
 ## 将来拡張（未着手・意図的にスコープ外）
 
 - あがり率・放銃率・得意役・平均点などの個人統計（`hand_logs`と`session_scores`から算出可能、データが貯まってから着手）
@@ -83,4 +90,5 @@ Cloudflare Workers + D1 + R2 + Workers AI (Hono) で構築。詳細なセット�
   - `/days/:id/sessions/:sid/delete`（POST）: 半荘を削除（関連するsession_scores/hand_logs/photo_uploadsも削除、参照しているyakuman_events.gameSessionIdはnullに更新）。確認ダイアログ付き
   - `/days/:id/yakuman/:yid/delete`, `/days/:id/hands/:hid/delete`（POST）: 役満・局メモの削除
   - 対局日自体の削除（day削除）は未実装（意図的に見送り。誤操作の影響が大きいため）
+- **撮影ページで写真をアップロード前にクライアント側リサイズ**: `src/routes/days.tsx`の撮影ページ（`/days/:id/sessions/:sid/capture`）で、`canvas`を使い長辺1600px・JPEG品質0.85に縮小してから`/api/ocr`にアップロードする（スマホの高解像度写真をそのまま送るとOCRが遅い/失敗しやすい懸念への対応）。縮小に失敗した場合は元画像にフォールバック
 - 未着手: 本番用D1/R2の実リソース作成（`wrangler.toml`の`database_id`はプレースホルダー）、本番シークレット登録、デプロイ

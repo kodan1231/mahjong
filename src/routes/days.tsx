@@ -507,14 +507,43 @@ dayRoutes.get("/days/:id/sessions/:sid/capture", requireAdmin, async (c) => {
         // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{
           __html: `
+            const MAX_DIMENSION = 1600;
+            const JPEG_QUALITY = 0.85;
+
+            async function resizeImage(file) {
+              const bitmap = await createImageBitmap(file);
+              let { width, height } = bitmap;
+              if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+                const scale = MAX_DIMENSION / Math.max(width, height);
+                width = Math.round(width * scale);
+                height = Math.round(height * scale);
+              }
+              const canvas = document.createElement('canvas');
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(bitmap, 0, 0, width, height);
+              return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));
+            }
+
             const input = document.getElementById('photo-input');
             const status = document.getElementById('status');
             input.addEventListener('change', async () => {
               const file = input.files[0];
               if (!file) return;
+
+              status.textContent = '画像を縮小中...';
+              let uploadBlob = file;
+              try {
+                const resized = await resizeImage(file);
+                if (resized) uploadBlob = resized;
+              } catch (e) {
+                // 縮小に失敗しても元画像でアップロードを試みる
+              }
+
               status.textContent = '解析中...';
               const fd = new FormData();
-              fd.append('photo', file);
+              fd.append('photo', uploadBlob, 'photo.jpg');
               fd.append('gameSessionId', '${sessionId}');
               try {
                 const res = await fetch('/api/ocr', { method: 'POST', body: fd });

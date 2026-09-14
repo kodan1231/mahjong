@@ -256,11 +256,42 @@ const css = `
   .plus { color: var(--plus); font-weight: 700; }
   .minus { color: var(--minus); font-weight: 700; }
 
-  a { color: #0d5c3f; }
-  .card a { color: #0d5c3f; }
-  .app-main > p > a, .card > p > a { text-decoration: none; font-weight: 600; }
+  /* 背景（緑フェルト）に直接乗るリンクは金、白系カードの上に乗るリンクは緑にする（濃緑×濃緑で埋もれるのを防ぐ） */
+  a { color: var(--gold); text-decoration-color: rgba(201, 162, 39, 0.6); font-weight: 700; }
+  a:hover { color: #e8c766; }
+  .card a, table a { color: #0d5c3f; text-decoration-color: rgba(13, 92, 63, 0.4); }
+  .card a:hover, table a:hover { color: var(--gold-dark); }
+  .app-main > p > a, .card > p > a { text-decoration: none; }
 
   details summary { cursor: pointer; font-weight: 700; color: var(--ink); margin-top: 12px; }
+
+  /* まとめて入力（スプレッドシート風グリッド） */
+  .sheet-table { width: auto; border-collapse: collapse; background: white; }
+  .sheet-table th, .sheet-table td { border: 1px solid var(--tile-edge); padding: 0; text-align: center; }
+  .sheet-table th {
+    background: rgba(11, 74, 58, 0.06);
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--ink-soft);
+    padding: 7px 10px;
+    white-space: nowrap;
+  }
+  .sheet-table td:first-child {
+    font-weight: 700;
+    color: var(--ink-soft);
+    padding: 0 10px;
+    background: rgba(11, 74, 58, 0.04);
+  }
+  .sheet-table input[type=number] {
+    width: 5.2em;
+    border: none;
+    border-radius: 0;
+    padding: 9px 6px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    background: transparent;
+  }
+  .sheet-table input[type=number]:focus { background: #fff6d6; outline: 2px solid var(--gold); outline-offset: -2px; }
 
   @media (max-width: 480px) {
     .app-header { padding: 12px 14px; }

@@ -84,7 +84,17 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
   - `GET /overall`（通算タブ。全期間の合計テーブルのみ）
   - `GET /days/:id`（対局日の詳細。年タブから日付をクリックして辿り着く想定。`?autorefresh=1`で20秒ごとの自動更新トグルも維持）
   - `GET /players/:id`（個人成績：通算合計・素点推移グラフ・年別内訳・着順分布・役満一覧。**通算の数値はここでのみ表示**し、他のページではプレイヤー名のリンク経由でここに誘導する）
-- 管理者専用: `/login`, `/players`, `/days/new`, `POST /days/close`, `/days/:id/edit`, `/days/:id/sessions/new`, `/days/:id/sessions/:sid/capture`, `/api/ocr`, `/days/:id/sessions/:sid/confirm`, `/days/:id/yakuman`, `/days/:id/sessions/:sid/hands`, 各種delete系ルート
+- 管理者専用: `/login`, `/players`, `/days/new`, `POST /days/close`, `/days/:id/edit`, `/days/:id/sessions/new`, `/days/:id/sessions/:sid/capture`, `/api/ocr`, `/days/:id/sessions/:sid/confirm`, `/days/:id/yakuman`, `/days/:id/sessions/:sid/hands`, `/days/:id/sheet`（下記）, 各種delete系ルート
+
+### まとめて入力（スプレッドシート風の一括登録、過去履歴のバックフィル向け）
+
+`GET/POST /days/:id/sheet`。半荘ごとに座席登録→撮影→確認、という通常フロー（**これは変更しないこと** — 実機での当日運用はこの流れのまま使う）とは別に、「行＝半荘、列＝その日の参加者」の表に直接素点を入力して一括保存できる画面。雀荘の紙の記録用紙をイメージしたUI。
+
+- 列はその日の`day_participants`（登録順）。行は既存の半荘（seq順）＋空行5つ（`SHEET_EXTRA_BLANK_ROWS`）
+- 1行につき4人分すべて数値が入っていれば、その場で`computeRankAndChips`を実行し`status: "confirmed"`のgame_session（無ければ新規作成）として保存する。列の並び順がそのままseatIndex 0-3になる
+- 空欄のみの行はスキップ（未入力として無視）。1〜3人分しか入っていない行、同点になる行は保存せず、どのseqが保存されなかったか`?skipped=3,4`のようなクエリでGET側に伝えて警告表示する
+- 箱割れ・役満・局メモはこの画面では扱わない。保存後に`/days/:id`や個別半荘の確認画面から編集する
+- display_modeは常に`raw`固定（素点をそのまま入力する前提。配給原点からの差分入力には対応しない）
 
 `/days`（対局日一覧・年ごとにグループ化する単独ページ）と`/stats/:year`は廃止し、`/years/:year`に統合した。年間の対局数が少ない（12試合程度）想定のため、日別の専用一覧ページは持たず年タブに内包している。
 
@@ -101,6 +111,7 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
 - **文字サイズ**: 利用者に高齢の方が多いため`html { font-size: 18px }`で全体的に大きめに設定。その分、カード内padding・テーブルセルpadding・見出しの上マージンは詰めて、1画面に収まる情報量とのバランスを取っている
 - **座席・プレイヤー選択（`.choice-group` / `.choice-btn`）**: `<select>`ではなく、ラジオボタンをボタン風に見せる方式（`.choice-btn:has(input:checked)`でアクティブ状態を表現）。参加者が最大6人程度なので1行に並べたいが、大きめの文字サイズだと画面幅に収まりきらない可能性があるため、`.choice-group`は`flex-wrap:nowrap; overflow-x:auto`とし、2段に折り返す代わりに横スクロールで対応する設計にしている。座席登録画面（`/days/:id/sessions/new`）と確認画面（`/days/:id/sessions/:sid/confirm`）の両方で使用
 - **一覧系テーブルからチップ合計を削除**: `TotalsTable`（当日/年度別/通算タブ、対局日の小計）は素点合計のみ表示する。チップ合計は`/players/:id`の個人ページでのみ表示する方針（チップはあくまで付録情報のため）
+- **リンクの色は背景で切り替え**: 濃緑のフェルト背景に直接乗るリンク（`a`のデフォルト）は金（`--gold`）、白系カード/テーブルの上のリンク（`.card a`, `table a`）は緑（`#0d5c3f`）。同系色×同系色で文字が埋もれる問題（濃緑背景に濃緑リンク）が実際に起きたための対応。新しく`.card`の外に直接リンクを置く場合は金系の配色になる点に注意
 
 **Honoの罠**: サブルーターに`.use("*", middleware)`を書いて`app.route("/", subApp)`でマウントすると、そのミドルウェアがアプリ全体（他のサブルーターのパスも含む）にかかってしまう。各ルートに個別で `requireAdmin` を渡す方式にしている（`playerRoutes.get("/players", requireAdmin, handler)`）。新しい管理者専用ルートを追加する際もこの書き方を踏襲すること。
 

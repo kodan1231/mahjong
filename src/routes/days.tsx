@@ -247,9 +247,12 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
       })}
 
       {admin && (
-        <p>
+        <p style="display:flex; gap:10px; flex-wrap:wrap">
           <a class="btn" href={`/days/${dayId}/sessions/new`}>
             次の半荘を登録
+          </a>
+          <a class="btn btn-secondary" href={`/days/${dayId}/sheet`}>
+            まとめて入力する
           </a>
         </p>
       )}
@@ -953,4 +956,181 @@ dayRoutes.post("/days/:id/edit", requireAdmin, async (c) => {
   }
 
   return c.redirect(`/days/${dayId}`);
+});
+
+// ---------- まとめて入力（スプレッドシート風の一括登録・過去履歴のバックフィル向け） ----------
+// 半荘ごとの座席登録→撮影→確認、という通常フローとは別に、
+// 「行＝半荘、列＝参加者」の表に直接素点を入力して一括保存できる画面。
+// 箱割れ・役満・局メモはここでは扱わず、通常の対局日詳細ページから編集する。
+
+const SHEET_EXTRA_BLANK_ROWS = 5;
+
+dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
+  const dayId = Number(c.req.param("id"));
+  const db = getDb(c.env);
+
+  const [day] = await db.select().from(days).where(eq(days.id, dayId));
+  if (!day) return c.notFound();
+
+  const participants = await db
+    .select({ playerId: players.id, name: players.name })
+    .from(dayParticipants)
+    .innerJoin(players, eq(dayParticipants.playerId, players.id))
+    .where(eq(dayParticipants.dayId, dayId))
+    .orderBy(dayParticipants.id);
+
+  const sessions = await db
+    .select()
+    .from(gameSessions)
+    .where(eq(gameSessions.dayId, dayId))
+    .orderBy(asc(gameSessions.seq));
+
+  const sessionIds = sessions.map((s) => s.id);
+  const scoreRows = sessionIds.length
+    ? await db.select().from(sessionScores).where(inArray(sessionScores.gameSessionId, sessionIds))
+    : [];
+
+  const totalRows = sessions.length + SHEET_EXTRA_BLANK_ROWS;
+  const skippedParam = c.req.query("skipped");
+  const skippedSeqs = skippedParam ? skippedParam.split(",").map(Number) : [];
+
+  return c.html(
+    <Layout title="まとめて入力" isAdmin={true}>
+      <h1>{day.date}: まとめて入力</h1>
+      <p>
+        行＝半荘、列＝参加者。1半荘につき4人分の素点を入力してください（同点・3人以下の入力は保存されません）。
+        箱割れ・役満・局メモは<a href={`/days/${dayId}`}>対局日の詳細ページ</a>から編集してください。
+      </p>
+      {skippedSeqs.length > 0 && (
+        <p class="warning">
+          第{skippedSeqs.join("・")}回は保存されませんでした（4人分そろっていない、または同点があります）。確認して入力し直してください。
+        </p>
+      )}
+      <div style="overflow-x:auto">
+        <form method="post" action={`/days/${dayId}/sheet`}>
+          <table class="sheet-table">
+            <thead>
+              <tr>
+                <th>回</th>
+                {participants.map((p) => (
+                  <th>{p.name}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: totalRows }).map((_, i) => {
+                const seq = i + 1;
+                const session = sessions[i];
+                return (
+                  <tr>
+                    <td>{seq}</td>
+                    {participants.map((p) => {
+                      const existing = session
+                        ? scoreRows.find((r) => r.gameSessionId === session.id && r.playerId === p.playerId)
+                        : undefined;
+                      return (
+                        <td>
+                          <input
+                            type="number"
+                            name={`score_${seq}_${p.playerId}`}
+                            value={existing?.rawScore != null ? String(existing.rawScore) : ""}
+                          />
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p>
+            <button class="btn" type="submit">
+              まとめて保存
+            </button>
+          </p>
+        </form>
+      </div>
+      <p>
+        <a href={`/days/${dayId}`}>← 対局日の詳細に戻る</a>
+      </p>
+    </Layout>,
+  );
+});
+
+dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
+  const dayId = Number(c.req.param("id"));
+  const db = getDb(c.env);
+
+  const participants = await db
+    .select({ playerId: dayParticipants.playerId })
+    .from(dayParticipants)
+    .where(eq(dayParticipants.dayId, dayId))
+    .orderBy(dayParticipants.id);
+  const participantIds = participants.map((p) => p.playerId);
+
+  const existingSessions = await db
+    .select()
+    .from(gameSessions)
+    .where(eq(gameSessions.dayId, dayId))
+    .orderBy(asc(gameSessions.seq));
+
+  const body = await c.req.parseBody();
+  const totalRows = existingSessions.length + SHEET_EXTRA_BLANK_ROWS;
+  const skippedSeqs: number[] = [];
+
+  for (let i = 0; i < totalRows; i++) {
+    const seq = i + 1;
+    const entries: { playerId: number; rawScore: number }[] = [];
+    for (const playerId of participantIds) {
+      const raw = body[`score_${seq}_${playerId}`];
+      if (raw === undefined || raw === "") continue;
+      const n = Number(raw);
+      if (Number.isFinite(n)) entries.push({ playerId, rawScore: n });
+    }
+
+    if (entries.length === 0) continue; // 未入力の行はスキップ
+
+    if (entries.length !== 4) {
+      skippedSeqs.push(seq);
+      continue;
+    }
+
+    const { ranked, hasTie } = computeRankAndChips(entries);
+    if (hasTie) {
+      skippedSeqs.push(seq);
+      continue;
+    }
+
+    let session = existingSessions[i];
+    if (!session) {
+      const [inserted] = await db
+        .insert(gameSessions)
+        .values({ dayId, seq, status: "confirmed", displayMode: "raw", playedAt: new Date().toISOString() })
+        .returning();
+      session = inserted;
+    } else {
+      await db
+        .update(gameSessions)
+        .set({ status: "confirmed", playedAt: session.playedAt ?? new Date().toISOString() })
+        .where(eq(gameSessions.id, session.id));
+    }
+
+    if (!session) continue;
+
+    // 列（プレイヤー）の並び順をそのまま座席順として保存し直す
+    await db.delete(sessionScores).where(eq(sessionScores.gameSessionId, session.id));
+    await db.insert(sessionScores).values(
+      ranked.map((r, seatIndex) => ({
+        gameSessionId: session!.id,
+        seatIndex,
+        playerId: r.playerId,
+        rawScore: r.rawScore,
+        rank: r.rank,
+        rankChip: r.rankChip,
+      })),
+    );
+  }
+
+  const query = skippedSeqs.length ? `?skipped=${skippedSeqs.join(",")}` : "";
+  return c.redirect(`/days/${dayId}/sheet${query}`);
 });

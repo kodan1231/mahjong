@@ -112,6 +112,12 @@ statsRoutes.get("/players/:id", async (c) => {
           ポイント合計: <Signed n={mine?.rawTotal ?? 0} /> ／ チップ合計: <Signed n={mine?.chipTotal ?? 0} /> ／ 半荘数:{" "}
           {gameCount}
         </p>
+        {history.length >= 2 && (
+          <p style="font-size:0.8rem; color:var(--ink-soft); margin:6px 0 2px">
+            通算ポイントの推移（横軸: 確定した半荘を{history[0]!.date}〜{history[history.length - 1]!.date}
+            の古い順に並べたもの／縦軸: その時点までの累計ポイント）
+          </p>
+        )}
         <Sparkline points={history.map((h) => h.cumulativeRaw)} />
       </div>
 

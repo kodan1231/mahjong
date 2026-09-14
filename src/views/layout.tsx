@@ -61,7 +61,8 @@ const css = `
     --tile: #faf6ec;
     --tile-edge: #e8dfc8;
     --ink: #23281f;
-    --ink-soft: #5b6357;
+    --ink-soft: #5b6357; /* カード/テーブルなど明るい背景の上でのみ使う（緑背景に直接置くと読みにくい） */
+    --felt-soft: rgba(238, 242, 236, 0.72); /* 緑フェルト背景に直接置く控えめな文字色（--ink-softの緑背景版） */
     --gold: #c9a227;
     --gold-dark: #a3801a;
     --plus: #2f9e58;

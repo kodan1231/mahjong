@@ -7,6 +7,13 @@
  */
 export const ORIGIN_SCORE = 25;
 
+/**
+ * まとめて入力画面で箱割れを自動判定する閾値（ポイント）。この値以下なら自動的に
+ * isHakoware: true として保存する。当初は「持ち点が0未満＝配給原点(25)を下回る」を基準に
+ * -25としていたが、ユーザーの実運用に合わせて-31に変更（2026-09-16）。
+ */
+export const HAKOWARE_AUTO_THRESHOLD = -31;
+
 // 着順ごとの固定チップ (1位+3 / 2位0 / 3位-1 / 4位-2)
 const RANK_CHIP_TABLE: Record<number, number> = { 1: 3, 2: 0, 3: -1, 4: -2 };
 

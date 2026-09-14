@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { eq, and, desc, asc, inArray } from "drizzle-orm";
 import type { Env } from "../types";
 import { getDb, type Db } from "../db/client";
@@ -16,7 +16,14 @@ import {
 import { Layout } from "../views/layout";
 import { Signed, TotalsTable, TabBar } from "../views/components";
 import { requireAdmin, isAdmin } from "../lib/auth";
-import { computeRankAndChips, normalizeRawScore, sumScores, ORIGIN_SCORE, type DisplayMode } from "../lib/scoring";
+import {
+  computeRankAndChips,
+  normalizeRawScore,
+  sumScores,
+  ORIGIN_SCORE,
+  HAKOWARE_AUTO_THRESHOLD,
+  type DisplayMode,
+} from "../lib/scoring";
 import { computeDaySummary } from "../lib/aggregate";
 
 export const dayRoutes = new Hono<{ Bindings: Env }>();
@@ -344,7 +351,7 @@ dayRoutes.get("/", async (c) => {
       <TabBar active="today" />
       <h1>
         直近の成績{" "}
-        <small style="font-size:0.6em; color:var(--ink-soft)">
+        <small style="font-size:0.6em; color:var(--felt-soft)">
           （{data.day.date}
           {data.day.memo ? ` ${data.day.memo}` : ""}）
         </small>
@@ -1057,8 +1064,21 @@ dayRoutes.post("/days/:id/edit", requireAdmin, async (c) => {
 
 const SHEET_EXTRA_BLANK_ROWS = 8;
 
-dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
-  const dayId = Number(c.req.param("id"));
+// GET（初回表示）とPOST（保存後の再表示）で共通利用する描画関数。
+// POST側は保存の成否に関わらずリダイレクトせずこの関数で直接HTMLを返すことで、
+// 合計不一致・入力不足などで保存されなかった行についても「今まさに入力した値」を
+// そのまま画面に残せるようにしている（overridesが指定された値を優先する）。
+async function renderSheetPage(
+  c: Context<{ Bindings: Env }>,
+  dayId: number,
+  opts: {
+    overrides?: Map<string, string>;
+    totalRows?: number;
+    partialSeqs?: number[];
+    tiedSeqs?: number[];
+    badSumSeqs?: number[];
+  } = {},
+) {
   const db = getDb(c.env);
 
   const [day] = await db.select().from(days).where(eq(days.id, dayId));
@@ -1076,19 +1096,19 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
     .from(gameSessions)
     .where(eq(gameSessions.dayId, dayId))
     .orderBy(asc(gameSessions.seq));
+  const sessionBySeq = new Map(sessions.map((s) => [s.seq, s]));
 
   const sessionIds = sessions.map((s) => s.id);
   const scoreRows = sessionIds.length
     ? await db.select().from(sessionScores).where(inArray(sessionScores.gameSessionId, sessionIds))
     : [];
 
-  const totalRows = Math.max(sessions.length, 0) + SHEET_EXTRA_BLANK_ROWS;
-  const partialParam = c.req.query("partial");
-  const partialSeqs = partialParam ? partialParam.split(",").map(Number) : [];
-  const tiedParam = c.req.query("tied");
-  const tiedSeqs = tiedParam ? tiedParam.split(",").map(Number) : [];
-  const badSumParam = c.req.query("badsum");
-  const badSumSeqs = badSumParam ? badSumParam.split(",").map(Number) : [];
+  const maxExistingSeq = sessions.reduce((m, s) => Math.max(m, s.seq), 0);
+  const totalRows = opts.totalRows ?? maxExistingSeq + SHEET_EXTRA_BLANK_ROWS;
+  const partialSeqs = opts.partialSeqs ?? [];
+  const tiedSeqs = opts.tiedSeqs ?? [];
+  const badSumSeqs = opts.badSumSeqs ?? [];
+  const overrides = opts.overrides;
 
   return c.html(
     <Layout title="まとめて入力" isAdmin={true}>
@@ -1123,22 +1143,24 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
             <tbody>
               {Array.from({ length: totalRows }).map((_, i) => {
                 const seq = i + 1;
-                const session = sessions[i];
+                const session = sessionBySeq.get(seq);
                 return (
                   <tr>
                     <td>{seq}</td>
                     {participants.map((p) => {
-                      const existing = session
-                        ? scoreRows.find((r) => r.gameSessionId === session.id && r.playerId === p.playerId)
-                        : undefined;
+                      const overrideKey = `${seq}_${p.playerId}`;
+                      let value: string;
+                      if (overrides?.has(overrideKey)) {
+                        value = overrides.get(overrideKey)!;
+                      } else {
+                        const existing = session
+                          ? scoreRows.find((r) => r.gameSessionId === session.id && r.playerId === p.playerId)
+                          : undefined;
+                        value = existing?.rawScore != null ? String(existing.rawScore) : "";
+                      }
                       return (
                         <td>
-                          <input
-                            type="number"
-                            step="0.1"
-                            name={`score_${seq}_${p.playerId}`}
-                            value={existing?.rawScore != null ? String(existing.rawScore) : ""}
-                          />
+                          <input type="number" step="0.1" name={`score_${seq}_${p.playerId}`} value={value} />
                         </td>
                       );
                     })}
@@ -1217,6 +1239,11 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
       />
     </Layout>,
   );
+}
+
+dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
+  const dayId = Number(c.req.param("id"));
+  return renderSheetPage(c, dayId);
 });
 
 dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
@@ -1245,6 +1272,17 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
   for (const key of Object.keys(body)) {
     const m = key.match(/^score_(\d+)_\d+$/);
     if (m) maxSeq = Math.max(maxSeq, Number(m[1]));
+  }
+
+  // 合計不一致・入力不足などで保存されなかった行も含め、送信された入力値をそのまま
+  // 再表示できるように保持しておく（保存の成否に関わらず今回の入力値を優先表示する）。
+  const submittedOverrides = new Map<string, string>();
+  for (const playerId of participantIds) {
+    for (let seq = 1; seq <= maxSeq; seq++) {
+      const key = `score_${seq}_${playerId}`;
+      const raw = body[key];
+      if (typeof raw === "string") submittedOverrides.set(`${seq}_${playerId}`, raw);
+    }
   }
 
   const partialSeqs: number[] = [];
@@ -1295,7 +1333,7 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
           seatIndex,
           playerId: e.playerId,
           rawScore: e.rawScore,
-          isHakoware: e.rawScore < -ORIGIN_SCORE,
+          isHakoware: e.rawScore <= HAKOWARE_AUTO_THRESHOLD,
         })),
       );
       continue;
@@ -1327,15 +1365,23 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
         rawScore: r.rawScore,
         rank: r.rank,
         rankChip: r.rankChip,
-        isHakoware: r.rawScore < -ORIGIN_SCORE,
+        isHakoware: r.rawScore <= HAKOWARE_AUTO_THRESHOLD,
       })),
     );
   }
 
-  const params = new URLSearchParams();
-  if (partialSeqs.length) params.set("partial", partialSeqs.join(","));
-  if (tiedSeqs.length) params.set("tied", tiedSeqs.join(","));
-  if (badSumSeqs.length) params.set("badsum", badSumSeqs.join(","));
-  const query = params.toString() ? `?${params.toString()}` : "";
-  return c.redirect(`/days/${dayId}/sheet${query}`);
+  // 全行成功した場合のみリダイレクト（二重送信防止のPost-Redirect-Getパターン）。
+  // 1行でも保存されなかった行があれば、リダイレクトせずこの場で描画し、
+  // 送信された入力値（submittedOverrides）をそのまま表示して入力し直しやすくする。
+  if (partialSeqs.length === 0 && tiedSeqs.length === 0 && badSumSeqs.length === 0) {
+    return c.redirect(`/days/${dayId}/sheet`);
+  }
+
+  return renderSheetPage(c, dayId, {
+    overrides: submittedOverrides,
+    totalRows: maxSeq,
+    partialSeqs,
+    tiedSeqs,
+    badSumSeqs,
+  });
 });

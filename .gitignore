@@ -5,3 +5,4 @@ dist/
 .dev.vars
 worker-configuration.d.ts
 *.log
+.claude/settings.local.json

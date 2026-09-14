@@ -16,7 +16,7 @@ import {
 import { Layout } from "../views/layout";
 import { Signed, TotalsTable, TabBar } from "../views/components";
 import { requireAdmin, isAdmin } from "../lib/auth";
-import { computeRankAndChips, normalizeRawScore, ORIGIN_SCORE, type DisplayMode } from "../lib/scoring";
+import { computeRankAndChips, normalizeRawScore, sumScores, ORIGIN_SCORE, type DisplayMode } from "../lib/scoring";
 import { computeDaySummary } from "../lib/aggregate";
 
 export const dayRoutes = new Hono<{ Bindings: Env }>();
@@ -117,7 +117,7 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
 
       <div class="card">
         <h2>この日の小計</h2>
-        <TotalsTable totals={daySummary} />
+        <TotalsTable totals={daySummary} showChips={true} />
       </div>
 
       <h2>半荘一覧</h2>
@@ -689,10 +689,14 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
 
   const displayMode = session.displayMode as DisplayMode;
   const tieWarning = c.req.query("tie") === "1";
+  const badSumWarning = c.req.query("badsum") === "1";
 
   return c.html(
     <Layout title="点数を確認" isAdmin={true}>
       <h1>第{session.seq}半荘: 点数を確認</h1>
+      {badSumWarning && (
+        <p class="warning">4人分のポイントの合計が0になっていません。入力ミスがないか確認してください。</p>
+      )}
       {tieWarning && (
         <p class="warning">
           同点です。ポイントを調整して同点を解消するか、下のチェックを入れて座席の並び順（左の座席ほど上位）で仮の着順を確定してください。
@@ -701,7 +705,7 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
       <p>
         点数表示機の表示形式:{" "}
         {displayMode === "diff" ? `配給原点(${ORIGIN_SCORE}ポイント)からの±差分` : "素点をそのまま表示"}
-        （入力欄は自動的にポイント単位に変換されます）
+        （入力欄には配給原点からの増減が自動計算されて入ります。4人の合計は必ず0になります）
         {latestPhoto && (
           <>
             {" ／ "}
@@ -772,6 +776,17 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
   }));
 
   const acceptTie = body.acceptTie === "1";
+
+  // 4人分のポイント（配給原点からの差分）は必ず合計0になるはず。ずれていたら入力ミスなので確定させない。
+  if (Math.abs(sumScores(seatInputs.map(({ playerId, rawScore }) => ({ playerId, rawScore })))) > 0.05) {
+    for (const s of seatInputs) {
+      await db
+        .update(sessionScores)
+        .set({ playerId: s.playerId, rawScore: s.rawScore, isHakoware: s.isHakoware })
+        .where(and(eq(sessionScores.gameSessionId, sessionId), eq(sessionScores.seatIndex, s.seatIndex)));
+    }
+    return c.redirect(`/days/${dayId}/sessions/${sessionId}/confirm?badsum=1`);
+  }
 
   const { ranked, hasTie } = computeRankAndChips(
     seatInputs.map(({ playerId, rawScore }) => ({ playerId, rawScore })),
@@ -1022,18 +1037,26 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
   const partialSeqs = partialParam ? partialParam.split(",").map(Number) : [];
   const tiedParam = c.req.query("tied");
   const tiedSeqs = tiedParam ? tiedParam.split(",").map(Number) : [];
+  const badSumParam = c.req.query("badsum");
+  const badSumSeqs = badSumParam ? badSumParam.split(",").map(Number) : [];
 
   return c.html(
     <Layout title="まとめて入力" isAdmin={true}>
       <h1>{day.date}: まとめて入力</h1>
       <p>
-        行＝半荘、列＝参加者。1半荘につき4人分のポイント（素点÷1000、例: 32000点なら32）を入力してください。
-        箱割れの場合はそのままマイナスのポイントを入力してください（0未満を自動で「箱割れ」として記録します）。
+        行＝半荘、列＝参加者。1半荘につき4人分の「配給原点からの増減（ポイント）」を入力してください（例:
+        +7, 0, -3, -4のように、4人の合計が必ず0になります）。
+        箱割れの場合はマイナスがさらに深くなります（-{ORIGIN_SCORE}を超えると自動で「箱割れ」として記録します）。
         役満・局メモは<a href={`/days/${dayId}`}>対局日の詳細ページ</a>から編集してください。
       </p>
       {partialSeqs.length > 0 && (
         <p class="warning">
           第{partialSeqs.join("・")}回は4人分そろっていないため保存されませんでした。確認して入力し直してください。
+        </p>
+      )}
+      {badSumSeqs.length > 0 && (
+        <p class="warning">
+          第{badSumSeqs.join("・")}回は4人分の合計が0になっていないため保存されませんでした。入力ミスがないか確認してください。
         </p>
       )}
       {tiedSeqs.length > 0 && (
@@ -1104,9 +1127,10 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
         // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{
           __html: `
+            const sheetTbody = document.querySelector('#sheet-table tbody');
+
             document.getElementById('add-row-btn').addEventListener('click', () => {
-              const tbody = document.querySelector('#sheet-table tbody');
-              const rows = tbody.querySelectorAll('tr');
+              const rows = sheetTbody.querySelectorAll('tr');
               const lastRow = rows[rows.length - 1];
               const lastSeq = Number(lastRow.firstElementChild.textContent);
               const newSeq = lastSeq + 1;
@@ -1116,7 +1140,33 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
                 input.value = '';
                 input.name = input.name.replace(/^score_\\d+_/, 'score_' + newSeq + '_');
               });
-              tbody.appendChild(newRow);
+              sheetTbody.appendChild(newRow);
+            });
+
+            // 数字入力欄では上下キーで値が増減してしまうデフォルト挙動を止め、
+            // 上下左右キーでセル（隣の入力欄）へ移動するようにする（表計算ソフトの操作感に寄せる）。
+            sheetTbody.addEventListener('keydown', (e) => {
+              if (e.target.tagName !== 'INPUT') return;
+              if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+              e.preventDefault();
+
+              const td = e.target.closest('td');
+              const tr = td.closest('tr');
+              const rows = Array.from(sheetTbody.querySelectorAll('tr'));
+              const cells = Array.from(tr.querySelectorAll('td'));
+              let rowIndex = rows.indexOf(tr);
+              let colIndex = cells.indexOf(td);
+
+              if (e.key === 'ArrowUp') rowIndex -= 1;
+              if (e.key === 'ArrowDown') rowIndex += 1;
+              if (e.key === 'ArrowLeft') colIndex -= 1;
+              if (e.key === 'ArrowRight') colIndex += 1;
+
+              const targetRow = rows[rowIndex];
+              if (!targetRow) return;
+              const targetCell = targetRow.querySelectorAll('td')[colIndex];
+              const targetInput = targetCell && targetCell.querySelector('input[type=number]');
+              if (targetInput) targetInput.focus();
             });
           `,
         }}
@@ -1155,6 +1205,7 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
 
   const partialSeqs: number[] = [];
   const tiedSeqs: number[] = [];
+  const badSumSeqs: number[] = [];
 
   for (let seq = 1; seq <= maxSeq; seq++) {
     const entries: { playerId: number; rawScore: number }[] = [];
@@ -1169,6 +1220,12 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
 
     if (entries.length !== 4) {
       partialSeqs.push(seq);
+      continue;
+    }
+
+    // 4人分のポイント（配給原点からの差分）は必ず合計0になるはず。ずれていたら入力ミスとして保存しない。
+    if (Math.abs(sumScores(entries)) > 0.05) {
+      badSumSeqs.push(seq);
       continue;
     }
 
@@ -1194,7 +1251,7 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
           seatIndex,
           playerId: e.playerId,
           rawScore: e.rawScore,
-          isHakoware: e.rawScore < 0,
+          isHakoware: e.rawScore < -ORIGIN_SCORE,
         })),
       );
       continue;
@@ -1226,7 +1283,7 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
         rawScore: r.rawScore,
         rank: r.rank,
         rankChip: r.rankChip,
-        isHakoware: r.rawScore < 0,
+        isHakoware: r.rawScore < -ORIGIN_SCORE,
       })),
     );
   }
@@ -1234,6 +1291,7 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
   const params = new URLSearchParams();
   if (partialSeqs.length) params.set("partial", partialSeqs.join(","));
   if (tiedSeqs.length) params.set("tied", tiedSeqs.join(","));
+  if (badSumSeqs.length) params.set("badsum", badSumSeqs.join(","));
   const query = params.toString() ? `?${params.toString()}` : "";
   return c.redirect(`/days/${dayId}/sheet${query}`);
 });

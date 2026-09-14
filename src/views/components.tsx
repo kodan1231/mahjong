@@ -12,13 +12,16 @@ export const Signed = ({ n, unit = "" }: { n: number; unit?: string }) => {
   );
 };
 
-// チップ合計はあくまで付録情報のため一覧には出さず、個別成績ページ（/players/:id）でのみ表示する。
+// チップ合計はあくまで付録情報のため、通算/年度別/当日タブの一覧には出さない
+// （個人成績ページと、その日限りのチップ動向がわかる対局日の小計でのみ showChips で表示する）。
 export const TotalsTable = ({
   totals,
   showHeader = true,
+  showChips = false,
 }: {
   totals: { playerId: number; name: string; rawTotal: number; chipTotal: number }[];
   showHeader?: boolean;
+  showChips?: boolean;
 }) => (
   <table>
     {showHeader && (
@@ -26,6 +29,7 @@ export const TotalsTable = ({
         <tr>
           <th>プレイヤー</th>
           <th>ポイント合計</th>
+          {showChips && <th>チップ合計</th>}
         </tr>
       </thead>
     )}
@@ -38,6 +42,11 @@ export const TotalsTable = ({
           <td>
             <Signed n={t.rawTotal} />
           </td>
+          {showChips && (
+            <td>
+              <Signed n={t.chipTotal} />
+            </td>
+          )}
         </tr>
       ))}
     </tbody>

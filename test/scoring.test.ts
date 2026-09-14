@@ -3,33 +3,51 @@ import {
   normalizeRawScore,
   computeRankAndChips,
   computeYakumanChips,
+  sumScores,
 } from "../src/lib/scoring";
 
-// アプリ全体の点数単位は「ポイント」（実際の素点÷1000。例: 素点32000点 → 32ポイント）。
+// アプリ全体で保存・集計する点数の単位は「ポイント」＝配給原点(25000点=25ポイント)からの
+// 増減（差分）。例: 最終所持点32000点なら+7ポイント。1半荘の4人分は必ず合計0になる。
 
 describe("normalizeRawScore", () => {
-  it("rawモード: 素点（画面表示そのまま）を1000で割ってポイントに変換する", () => {
-    expect(normalizeRawScore(32000, "raw")).toBe(32);
-    expect(normalizeRawScore(24700, "raw")).toBe(24.7); // 100点単位の端数もそのまま反映される
+  it("rawモード: 素点（画面に表示された絶対値）を1000で割ってから配給原点を引き、差分に変換する", () => {
+    expect(normalizeRawScore(32000, "raw")).toBe(7); // 32000/1000 - 25 = 7
+    expect(normalizeRawScore(24700, "raw")).toBeCloseTo(-0.3, 5); // 24.7 - 25
   });
 
-  it("diffモード: 表示値は既にポイント単位の差分なので、originにそのまま加算する", () => {
-    expect(normalizeRawScore(7, "diff")).toBe(32);
-    expect(normalizeRawScore(-3.5, "diff")).toBe(21.5);
+  it("diffモード: 表示値は既に配給原点からの差分そのものなので、変換不要でそのまま使う", () => {
+    expect(normalizeRawScore(7, "diff")).toBe(7);
+    expect(normalizeRawScore(-3.5, "diff")).toBe(-3.5);
   });
 
-  it("supports a custom origin", () => {
-    expect(normalizeRawScore(5, "diff", 30)).toBe(35);
+  it("supports a custom origin for raw mode", () => {
+    expect(normalizeRawScore(35000, "raw", 30)).toBe(5); // 35 - 30
+  });
+});
+
+describe("sumScores", () => {
+  it("1半荘の4人分の差分ポイントは合計0になる（麻雀のルール上、総得点は不変のため）", () => {
+    const sum = sumScores([
+      { playerId: 1, rawScore: 7 },
+      { playerId: 2, rawScore: 0 },
+      { playerId: 3, rawScore: -3 },
+      { playerId: 4, rawScore: -4 },
+    ]);
+    expect(sum).toBe(0);
+  });
+
+  it("returns 0 for an empty list", () => {
+    expect(sumScores([])).toBe(0);
   });
 });
 
 describe("computeRankAndChips", () => {
   it("ranks by point score descending and assigns fixed chips", () => {
     const { ranked, hasTie } = computeRankAndChips([
-      { playerId: 1, rawScore: 25 },
-      { playerId: 2, rawScore: 40 },
-      { playerId: 3, rawScore: 15 },
-      { playerId: 4, rawScore: 20 },
+      { playerId: 1, rawScore: 0 },
+      { playerId: 2, rawScore: 15 },
+      { playerId: 3, rawScore: -10 },
+      { playerId: 4, rawScore: -5 },
     ]);
 
     expect(hasTie).toBe(false);
@@ -40,20 +58,20 @@ describe("computeRankAndChips", () => {
 
   it("sums to zero across the four fixed chip values", () => {
     const { ranked } = computeRankAndChips([
-      { playerId: 1, rawScore: 10 },
-      { playerId: 2, rawScore: 20 },
-      { playerId: 3, rawScore: 30 },
-      { playerId: 4, rawScore: 40 },
+      { playerId: 1, rawScore: -15 },
+      { playerId: 2, rawScore: -5 },
+      { playerId: 3, rawScore: 5 },
+      { playerId: 4, rawScore: 15 },
     ]);
     expect(ranked.reduce((sum, r) => sum + r.rankChip, 0)).toBe(0);
   });
 
   it("flags ties without crashing", () => {
     const { hasTie, ranked } = computeRankAndChips([
-      { playerId: 1, rawScore: 25 },
-      { playerId: 2, rawScore: 25 },
-      { playerId: 3, rawScore: 20 },
-      { playerId: 4, rawScore: 30 },
+      { playerId: 1, rawScore: 5 },
+      { playerId: 2, rawScore: 5 },
+      { playerId: 3, rawScore: -20 },
+      { playerId: 4, rawScore: 10 },
     ]);
     expect(hasTie).toBe(true);
     expect(ranked).toHaveLength(4);

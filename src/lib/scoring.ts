@@ -1,6 +1,9 @@
 /**
- * アプリ全体で使う点数の単位は「ポイント」（実際の素点÷1000。例: 素点32000点 → 32ポイント）。
- * 配給原点は素点25000点 = 25ポイント。
+ * アプリ全体で保存・集計する点数の単位は「ポイント」＝配給原点(25000点=25ポイント)からの
+ * 増減（差分）。例: 最終所持点32000点なら +7ポイント、21000点なら -4ポイント。
+ * 1半荘に参加した4人分のポイントは、麻雀のルール上必ず合計0になる（総得点は不変のため）。
+ * このため各プレイヤーの通算ポイントは「毎半荘のポイントをそのまま合計するだけ」でよい
+ * （素点から改めて原点を引く必要はない。raw_scoreは既に差分そのものを保存している）。
  */
 export const ORIGIN_SCORE = 25;
 
@@ -10,24 +13,33 @@ const RANK_CHIP_TABLE: Record<number, number> = { 1: 3, 2: 0, 3: -1, 4: -2 };
 export type DisplayMode = "raw" | "diff";
 
 /**
- * 点数表示機のOCR値をポイント単位に正規化する。
- * - rawモード（素点そのまま表示）: 表示されている数値は「素点」（例: 32000）なので、
- *   1000で割ってポイントに変換する（32000 → 32）。麻雀の素点は100点単位で丸められるため
+ * 点数表示機のOCR値を「配給原点からの差分（ポイント）」に正規化する。
+ * - rawモード（素点そのまま表示）: 表示されている数値は素点の絶対値（例: 32000）なので、
+ *   1000で割ってポイント化してから配給原点(origin)を引き、差分に変換する
+ *   （32000 → 32ポイント → 32-25 = +7）。麻雀の素点は100点単位で丸められるため
  *   小数第1位までに丸める。
- * - diffモード（配給原点からの±差分表示）: 表示されている数値は既に「ポイント」単位の
- *   差分（例: "+7"は+7ポイント=+7000点）なので、そのままoriginに加算するだけでよい。
+ * - diffモード（配給原点からの±差分表示）: 表示されている数値（例: "+7"）が既に
+ *   差分そのものなので、変換は不要でそのまま使う。
  */
 export function normalizeRawScore(
   ocrValue: number,
   displayMode: DisplayMode,
   origin: number = ORIGIN_SCORE,
 ): number {
-  return displayMode === "diff" ? origin + ocrValue : Math.round(ocrValue / 100) / 10;
+  return displayMode === "diff" ? ocrValue : Math.round(ocrValue / 100) / 10 - origin;
 }
 
 export interface PlayerScore {
   playerId: number;
   rawScore: number;
+}
+
+/**
+ * 1半荘の参加者全員分の差分ポイントを合計する。麻雀のルール上、必ず0になる
+ * （持ち点の総量は不変のため）。0からずれている場合は入力ミスの可能性が高い。
+ */
+export function sumScores(scores: PlayerScore[]): number {
+  return scores.reduce((sum, s) => sum + s.rawScore, 0);
 }
 
 export interface RankedScore extends PlayerScore {

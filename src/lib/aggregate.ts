@@ -9,7 +9,7 @@ import {
   yakumanEvents,
   yakumanEventTargets,
 } from "../db/schema";
-import { ORIGIN_SCORE, computeYakumanChips } from "./scoring";
+import { computeYakumanChips } from "./scoring";
 
 export interface PlayerTotal {
   playerId: number;
@@ -92,7 +92,8 @@ export async function computeTotals(db: Db, range: DateRange = {}): Promise<Play
     for (const row of rows) {
       if (!dayIds.includes(row.dayId)) continue;
       if (row.rawScore != null) {
-        rawTotals.set(row.playerId, (rawTotals.get(row.playerId) ?? 0) + (row.rawScore - ORIGIN_SCORE));
+        // raw_scoreは既に配給原点からの差分（ポイント）そのものなので、そのまま合計する。
+        rawTotals.set(row.playerId, (rawTotals.get(row.playerId) ?? 0) + row.rawScore);
       }
       if (row.rankChip != null) {
         rankChipTotals.set(row.playerId, (rankChipTotals.get(row.playerId) ?? 0) + row.rankChip);
@@ -139,7 +140,7 @@ export async function computeDaySummary(db: Db, dayId: number): Promise<PlayerTo
 
   for (const row of rows) {
     if (row.rawScore != null) {
-      rawTotals.set(row.playerId, (rawTotals.get(row.playerId) ?? 0) + (row.rawScore - ORIGIN_SCORE));
+      rawTotals.set(row.playerId, (rawTotals.get(row.playerId) ?? 0) + row.rawScore);
     }
     if (row.rankChip != null) {
       rankChipTotals.set(row.playerId, (rankChipTotals.get(row.playerId) ?? 0) + row.rankChip);
@@ -245,7 +246,7 @@ export async function computePlayerScoreHistory(db: Db, playerId: number): Promi
 
   let cumulative = 0;
   return sorted.map((r) => {
-    cumulative += r.rawScore - ORIGIN_SCORE;
+    cumulative += r.rawScore;
     return { date: r.date, seq: r.seq, cumulativeRaw: cumulative };
   });
 }

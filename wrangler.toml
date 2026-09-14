@@ -1,0 +1,20 @@
+name = "mahjong-score"
+main = "src/index.ts"
+compatibility_date = "2024-12-05"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mahjong-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "drizzle"
+
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "mahjong-photos"
+
+[ai]
+binding = "AI"
+
+[vars]
+APP_TIMEZONE = "Asia/Tokyo"

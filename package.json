@@ -1,0 +1,29 @@
+{
+  "name": "mahjong-score",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply mahjong-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply mahjong-db --remote",
+    "db:seed:local": "wrangler d1 execute mahjong-db --local --file=./drizzle/seed.sql",
+    "db:seed:remote": "wrangler d1 execute mahjong-db --remote --file=./drizzle/seed.sql",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "drizzle-orm": "^0.38.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.6.4",
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "drizzle-kit": "^0.30.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "wrangler": "^3.99.0"
+  }
+}

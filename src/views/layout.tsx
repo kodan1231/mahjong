@@ -68,7 +68,7 @@ const css = `
     --minus: #c0392b;
   }
   * { box-sizing: border-box; }
-  html { font-size: 18px; }
+  html { font-size: 20px; }
   body {
     margin: 0;
     font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -139,12 +139,12 @@ const css = `
   .app-nav a:hover, .app-nav .link-button:hover { background: rgba(201, 162, 39, 0.25); border-color: var(--gold); }
   .app-nav .inline-form { display: inline-flex; align-items: stretch; margin: 0; }
   .inline-form { display: inline-flex; }
-  .app-main { max-width: 760px; margin: 0 auto; padding: 14px 14px 40px; }
+  .app-main { max-width: 760px; margin: 0 auto; padding: 10px 12px 32px; }
 
-  h1 { font-size: 1.35rem; color: #fdf9ec; margin: 4px 0 12px; letter-spacing: 0.01em; }
+  h1 { font-size: 1.3rem; color: #fdf9ec; margin: 4px 0 10px; letter-spacing: 0.01em; }
   /* h2/h3は緑背景に直接置かれることもカードの中に置かれることもあるため、色は指定せず親から継承する */
-  h2 { font-size: 1.08rem; margin-top: 1.1em; }
-  h3 { font-size: 1.02rem; }
+  h2 { font-size: 1.05rem; margin-top: 0.85em; margin-bottom: 0.4em; }
+  h3 { font-size: 1rem; }
 
   .tab-bar {
     display: flex;
@@ -167,17 +167,17 @@ const css = `
   }
   .tab.active { background: var(--gold); color: #2a2306; }
 
-  table { width: 100%; border-collapse: collapse; margin: 8px 0; color: var(--ink); }
-  th, td { padding: 7px 5px; border-bottom: 1px solid var(--tile-edge); text-align: right; font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; margin: 6px 0; color: var(--ink); }
+  th, td { padding: 5px 4px; border-bottom: 1px solid var(--tile-edge); text-align: right; font-variant-numeric: tabular-nums; }
   th:first-child, td:first-child { text-align: left; }
-  th { color: var(--ink-soft); font-weight: 600; font-size: 0.82rem; }
+  th { color: var(--ink-soft); font-weight: 600; font-size: 0.78rem; }
 
   .card {
     background: var(--tile);
     border: 1px solid var(--tile-edge);
     border-radius: 14px;
-    padding: 14px;
-    margin-bottom: 14px;
+    padding: 12px;
+    margin-bottom: 12px;
     box-shadow: 0 6px 18px rgba(0,0,0,0.18);
     color: var(--ink);
   }

@@ -55,13 +55,13 @@ export const TotalsTable = ({
 
 export type TabKey = "today" | "year" | "overall";
 
-/** トップ画面の3タブ（当日 / 年度別 / 通算）。年度別タブのリンク先は指定年（省略時は今年）。 */
+/** トップ画面の3タブ（直近 / 年度別 / 通算）。年度別タブのリンク先は指定年（省略時は今年）。 */
 export const TabBar = ({ active, year }: { active: TabKey; year?: number }) => {
   const targetYear = year ?? new Date().getFullYear();
   return (
     <nav class="tab-bar">
       <a href="/" class={`tab${active === "today" ? " active" : ""}`}>
-        当日
+        直近
       </a>
       <a href={`/years/${targetYear}`} class={`tab${active === "year" ? " active" : ""}`}>
         年度別

@@ -67,7 +67,7 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
 ### コアロジック（`src/lib/scoring.ts`）
 
 - `normalizeRawScore(ocrValue, displayMode, origin=25) // ポイント単位`
-- `computeRankAndChips(scores)`: 同点時は`hasTie`を返し自動タイブレークしない（呼び出し側で警告し手動調整させる）
+- `computeRankAndChips(scores)`: 同点時は`hasTie`を返し自動タイブレークしない（呼び出し側で警告し手動調整させる）。`scores`の各要素は任意で`tieBreakPriority`（小さいほど上位。省略時は配列内の並び順）を持てる
 - `computeYakumanChips(dayParticipantIds, winnerId, perLoser=5)`
 - 単体テスト: `test/scoring.test.ts`（`npm test`）
 
@@ -86,7 +86,7 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
 
 - `days.status`: `open`（進行中） / `closed`（終了済み）。**「今日の日付」で新規作成するときだけ**、同時にopenな日は1つまでを強制する（`POST /days`は日付が今日と一致し、かつ既にopenな日があれば新規作成せずその日にリダイレクトする）。**過去日付での登録（バックフィル）は進行中の対局日の有無に関わらず常に許可**し、作成時点で最初からclosedとして扱う（後から何日分でもさかのぼって登録できる。この判定を誤ると「今季すでに何日か終わっている分をさかのぼって登録したい」という要件を満たせなくなるので注意）
 - 管理者ナビの「対局日を開始」→`/days/new`、「対局日を終了」→`POST /days/close`（現在openな日を探してclosedにし、その日の詳細へリダイレクト。openな日が無ければ`/`へ）。この2つは管理者メニューの先頭に配置（`src/views/layout.tsx`）
-- 「当日」タブ（`GET /`）はopenな日があればその内容を表示し、無ければ「現在進行中の対局日はありません」を表示する
+- 「直近」タブ（`GET /`、旧称「当日」。2026-09-15に改称）はopenな日があればその途中経過を表示し、openな日が無ければ最新（日付降順）の対局日をそのまま表示する（対局が無い日でも常に何かしら見えるようにするため。対局日が1つも無い場合のみ「まだ対局日がありません」を表示）
 - **同一日付の重複作成を防止**: `POST /days`は、指定日付の`days`行が既に存在する場合は新規作成せずその日の`/days/:id/sheet`へリダイレクトする。まとめて入力の行を増やしたいだけなのに誤って「対局日を開始・登録」をもう一度実行してしまい、同じ日付の対局日が複数できてしまう事故を防ぐ（まとめて入力の「＋行を追加」ボタンが無かった頃に実際に起きた問題）
 
 ### ルート構成（3タブ + 個人ページ + 履歴ドリルダウン）
@@ -95,20 +95,20 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
   - `GET /`（当日タブ。openな対局日の内容をそのまま表示）
   - `GET /years/:year`（年度別タブ。その年の合計テーブル＋終了済み対局日一覧。日付をクリックすると`/days/:id`へ）
   - `GET /overall`（通算タブ。全期間の合計テーブルのみ）
-  - `GET /days/:id`（対局日の詳細。年タブから日付をクリックして辿り着く想定。`?autorefresh=1`で20秒ごとの自動更新トグルも維持）
+  - `GET /days/:id`（対局日の詳細。年タブから日付をクリックして辿り着く想定）
   - `GET /players/:id`（個人成績：通算合計・ポイント推移グラフ・年別内訳・着順分布・役満一覧。**通算の数値はここでのみ表示**し、他のページではプレイヤー名のリンク経由でここに誘導する）
-- 管理者専用: `/login`, `/players`, `/days/new`, `POST /days/close`, `/days/:id/edit`, `/days/:id/sessions/new`, `/days/:id/sessions/:sid/capture`, `/api/ocr`, `/days/:id/sessions/:sid/confirm`, `/days/:id/yakuman`, `/days/:id/sessions/:sid/hands`, `/days/:id/sheet`（下記）, 各種delete系ルート
+- 管理者専用: `/login`, `/players`, `/days/new`, `POST /days/close`, `/days/:id/edit`, `POST /days/:id/delete`（対局日自体の削除。半荘・スコア・役満・局メモ・写真をすべてカスケード削除する。誤登録した対局日を消すための導線。`/days/:id/edit`ページ下部に確認ダイアログ付きボタンを設置）, `/days/:id/sessions/new`, `/days/:id/sessions/:sid/capture`, `/api/ocr`, `/days/:id/sessions/:sid/confirm`, `/days/:id/yakuman`, `/days/:id/sessions/:sid/hands`, `/days/:id/sheet`（下記）, 各種delete系ルート
 
 ### まとめて入力（スプレッドシート風の一括登録、過去履歴のバックフィル向け）
 
-`GET/POST /days/:id/sheet`。半荘ごとに座席登録→撮影→確認、という通常フロー（**これは変更しないこと** — 実機での当日運用はこの流れのまま使う）とは別に、「行＝半荘、列＝その日の参加者」の表に直接ポイントを入力して一括保存できる画面。雀荘の紙の記録用紙をイメージしたUI。
+`GET/POST /days/:id/sheet`。半荘ごとに座席登録→撮影→確認、という通常フロー（**これは変更しないこと** — 実機での当日運用はこの流れのまま使う）とは別に、「行＝半荘、列＝その日の参加者」の表に直接ポイントを入力して一括保存できる画面。雀荘の紙の記録用紙をイメージしたUI。画面上部の説明文（「行＝半荘、列＝参加者...」）は2026-09-15に削除済み（「使い方は見れば分かるので説明文は不要」というフィードバック）。条件付きの警告文（`partial`/`badsum`/`tied`）のみ残している。
 
 - 列はその日の`day_participants`（登録順）。行は既存の半荘（seq順）＋空行8つ（`SHEET_EXTRA_BLANK_ROWS = 8`。新規の日は最初から8行表示される）
 - テーブル下の「＋行を追加」ボタン（クライアント側JSのみ、サーバーラウンドトリップ不要）で最終行をクローンしてさらに行を追加できる。POST側は送信された`score_{seq}_{playerId}`フィールドの最大seqを見て処理範囲を決めるため、クライアントで追加した行も正しく保存される
 - 1行につき4人分すべて数値が入っていれば、その場で`computeRankAndChips`を実行し`status: "confirmed"`のgame_session（無ければ新規作成）として保存する。列の並び順がそのままseatIndex 0-3になる
 - 空欄のみの行はスキップ（未入力として無視）。1〜3人分しか入っていない行は`?partial=3,4`で警告
 - **合計0チェック**: 4人分のポイント（配給原点からの差分）の合計が0からずれている行（`sumScores`で判定、誤差許容0.05）は`?badsum=3,4`で警告し保存しない（入力ミスを検出するため）
-- **同点行の扱い**: 保存はするが`status: "pending"`のまま（rank/rankChipは付けない）にし、`?tied=3,4`で警告＋「同点の回を入力順で仮に確定する」チェックボックスを表示する。チェックして再送信すると`acceptTies=1`が送られ、入力順（列の並び＝左ほど上位）で`computeRankAndChips`のタイブレーク結果をそのまま採用してconfirmedにする。単一半荘の確認画面（`/days/:id/sessions/:sid/confirm`）にも同じ仕組み（`acceptTie`パラメータ）と合計0チェック（`?badsum=1`）がある
+- **同点行の扱い**: 保存はするが`status: "pending"`のまま（rank/rankChipは付けない）にし、`?tied=3,4`で警告＋「同点の回を入力順で仮に確定する」チェックボックスを表示する。チェックして再送信すると`acceptTies=1`が送られ、入力順（列の並び＝左ほど上位）で`computeRankAndChips`のタイブレーク結果をそのまま採用してconfirmedにする（まとめて入力画面では明示的な順位選択UIまでは持たせておらず、列の並び順のみ）。単一半荘の確認画面（`/days/:id/sessions/:sid/confirm`）にも同じ仕組み（`acceptTie`パラメータ）と合計0チェック（`?badsum=1`）があるが、こちらは**同点時に「同点時の順位」セレクト（各座席ごとに1〜4位を明示的に選べるプルダウン、デフォルトは座席順）が表示され**、選んだ順位が`tiebreak_{seatIndex}`として送信される（2026-09-15追加。「同ポイントの時に誰が上位かを選べるUIが欲しい」という要望への対応）。`computeRankAndChips`の`PlayerScore.tieBreakPriority`（小さいほど上位。省略時は配列内の並び順）でこの優先度を扱う。tieBreakPriorityを指定してもスコアが同点であること自体は変わらないため、`hasTie`は引き続きtrueになり、「同点のまま上で選んだ順位で確定する」チェックを入れないと確定されない点に注意
 - **箱割れの自動判定**: チェックボックスは無く、入力したポイント（差分）が`-ORIGIN_SCORE`（-25）を下回ったらその場で`isHakoware: true`として保存する（素点が0未満＝箱割れを意味するため）
 - **キーボード操作**: `input[type=number]`はデフォルトだと上下キーで数値が増減してしまうため、`.sheet-table tbody`にkeydownリスナーを付けて上下左右キーを`preventDefault`し、隣接するセルの入力欄へ`focus()`する（表計算ソフトのセル移動に寄せた挙動）。行を動的に追加してもイベント委譲（tbody側でリッスン）なので新しい行にも効く
 - 役満・局メモはこの画面では扱わない。保存後に`/days/:id`や個別半荘の確認画面から編集する
@@ -118,7 +118,9 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
 
 対局日詳細のデータ取得・描画（`src/routes/days.tsx`の`loadDayDetail` + `DayDetailBody`）は「当日」タブと`/days/:id`で共通利用している。新しい表示要素を足す場合は`DayDetailBody`側を触ればどちらにも反映される。
 
-`Layout`（`src/views/layout.tsx`）のナビは公開部分が「ホーム」のみで、タブ切り替えは各ページ内の`TabBar`コンポーネントが担う。管理者ログイン時は「対局日を開始」「対局日を終了」「プレイヤー管理」「ログアウト」がこの順で並ぶ。`extraHead`propでhead内に任意要素（自動更新用の`<meta http-equiv="refresh">`など）を差し込める。
+`Layout`（`src/views/layout.tsx`）のナビは公開部分が「ホーム」のみで、タブ切り替えは各ページ内の`TabBar`コンポーネントが担う。管理者ログイン時は「対局日を開始」「対局日を終了」「プレイヤー管理」「ログアウト」がこの順で並ぶ。`extraHead`propでhead内に任意要素を差し込める汎用の口があるが、現状どのページからも使われていない。
+
+**自動更新機能は廃止済み（2026-09-15）**: `/days/:id`にはかつて`?autorefresh=1`で20秒ごとに自動リロードするトグルがあったが、「結局何なのか分かりにくい」というフィードバックを受けて機能ごと削除した。再度似た要望が出た場合も、安易にmeta refreshへ戻さずSSE/pollingなど分かりやすいUIを検討すること。
 
 ### デザイン
 
@@ -126,7 +128,7 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
 
 - **フォント**: Google FontsからNoto Sans JPを読み込み（`<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:...">`）、`font-family`の先頭に指定。端末のシステムフォント任せだと（特にiOS Safariで）意図と異なる書体になることがあったための対応
 - **ナビゲーション**: `.app-nav`内のリンク/ボタンはピル型チップ表示（半透明の背景＋角丸）にしている。カード内の削除リンクなど`.app-nav`外の`.link-button`は下線付きテキストリンクとして別途スタイルしている（`.app-nav .link-button`のセレクタでナビ内だけ上書き）。`<a>`と`<button>`（フォーム内）で高さがズレないよう、両方に`display:inline-flex; align-items:center; margin:0`を明示している
-- **文字サイズ**: 利用者に高齢の方が多いため`html { font-size: 18px }`で全体的に大きめに設定。その分、カード内padding・テーブルセルpadding・見出しの上マージンは詰めて、1画面に収まる情報量とのバランスを取っている
+- **文字サイズ**: 利用者に高齢の方が多いため`html { font-size: 20px }`（当初18px、2026-09-15にさらに拡大）で全体的に大きめに設定。ボタン(`.btn`)やタブ(`.tab`)のpaddingはユーザーの指示で変更していない（見た目のサイズ感を変えないため）。その分、カード内padding・テーブル(`table`/`th,td`)のセルpadding・`.app-main`のpadding・見出し(`h1`/`h2`/`h3`)の上下マージンは詰めて、1画面に収まる情報量とのバランスを取っている。今後さらに文字を大きくする要望が来た場合も、まずボタン・タブ・テーブルの寸法は変えずpadding/marginの圧縮で吸収する方針を優先すること
 - **座席・プレイヤー選択（`.choice-group` / `.choice-btn`）**: `<select>`ではなく、ラジオボタンをボタン風に見せる方式（`.choice-btn:has(input:checked)`でアクティブ状態を表現）。参加者が最大6人程度なので1行に並べたいが、大きめの文字サイズだと画面幅に収まりきらない可能性があるため、`.choice-group`は`flex-wrap:nowrap; overflow-x:auto`とし、2段に折り返す代わりに横スクロールで対応する設計にしている。座席登録画面（`/days/:id/sessions/new`）と確認画面（`/days/:id/sessions/:sid/confirm`）の両方で使用
 - **一覧系テーブルからチップ合計を削除**: `TotalsTable`（当日/年度別/通算タブ、対局日の小計）はポイント合計のみ表示する。チップ合計は`/players/:id`の個人ページでのみ表示する方針（チップはあくまで付録情報のため）
 - **リンクの色は背景で切り替え**: 濃緑のフェルト背景に直接乗るリンク（`a`のデフォルト）は金（`--gold`）、白系カード/テーブルの上のリンク（`.card a`, `table a`）は緑（`#0d5c3f`）。同系色×同系色で文字が埋もれる問題（濃緑背景に濃緑リンク）が実際に起きたための対応。新しく`.card`の外に直接リンクを置く場合は金系の配色になる点に注意
@@ -158,7 +160,7 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
   - 半荘の確認画面（`/days/:id/sessions/:sid/confirm`）は`confirmed`後も再訪問可能な「編集」画面として機能する。各座席のプレイヤーもセレクトボックスで変更可能（座席とプレイヤーの紐づけ自体を後から修正できる）。フォームのフィールド名は`player_{seatIndex}` / `score_{seatIndex}` / `hakoware_{seatIndex}`（座席インデックス基準。playerId基準ではない点に注意）
   - `/days/:id/sessions/:sid/delete`（POST）: 半荘を削除（関連するsession_scores/hand_logs/photo_uploadsも削除、参照しているyakuman_events.gameSessionIdはnullに更新）。確認ダイアログ付き
   - `/days/:id/yakuman/:yid/delete`, `/days/:id/hands/:hid/delete`（POST）: 役満・局メモの削除
-  - 対局日自体の削除（day削除）は未実装（意図的に見送り。誤操作の影響が大きいため）
+  - `/days/:id/delete`（POST）: 対局日自体を削除（2026-09-15実装。当初は誤操作の影響が大きいため意図的に見送っていたが、「登録日を間違えたデータの削除導線がない」という要望を受けて追加。`/days/:id/edit`ページ下部に確認ダイアログ（`confirm()`）付きの削除ボタンを設置。半荘・スコア・役満・局メモ・写真を全てカスケード削除してから対局日自体を削除し、`/`へリダイレクトする）
 - **撮影ページで写真をアップロード前にクライアント側リサイズ**: `src/routes/days.tsx`の撮影ページ（`/days/:id/sessions/:sid/capture`）で、`canvas`を使い長辺1600px・JPEG品質0.85に縮小してから`/api/ocr`にアップロードする（スマホの高解像度写真をそのまま送るとOCRが遅い/失敗しやすい懸念への対応）。縮小に失敗した場合は元画像にフォールバック
 - **本番D1・シークレットは登録済み**: `wrangler d1 create`で実DB作成済み（`wrangler.toml`のdatabase_idを反映）、`wrangler secret put`で`ADMIN_PASSWORD`/`AUTH_SECRET`も登録済み。R2は使わない方針に変更したため未使用（有効化にクレジットカード登録が必要だったため見送り、写真はD1にBLOB保存する方式に変更した）
 - 未着手: `wrangler deploy`（本番デプロイ自体はまだ実行していない）

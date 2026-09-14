@@ -80,6 +80,18 @@ describe("computeRankAndChips", () => {
   it("returns an empty result for no scores", () => {
     expect(computeRankAndChips([])).toEqual({ ranked: [], hasTie: false });
   });
+
+  it("同点時、tieBreakPriorityが小さいプレイヤーを上位にする（管理者が明示的に選べるUI用）", () => {
+    const { ranked, hasTie } = computeRankAndChips([
+      { playerId: 1, rawScore: 5, tieBreakPriority: 2 },
+      { playerId: 2, rawScore: 5, tieBreakPriority: 1 },
+      { playerId: 3, rawScore: -20 },
+      { playerId: 4, rawScore: 10 },
+    ]);
+    expect(hasTie).toBe(true); // 同点であること自体は変わらないため、確定には引き続き警告・確認操作が必要
+    expect(ranked.map((r) => r.playerId)).toEqual([4, 2, 1, 3]);
+    expect(ranked.map((r) => r.rank)).toEqual([1, 2, 3, 4]);
+  });
 });
 
 describe("computeYakumanChips", () => {

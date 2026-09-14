@@ -32,6 +32,8 @@ export function normalizeRawScore(
 export interface PlayerScore {
   playerId: number;
   rawScore: number;
+  // 同点時の順位を明示的に指定するための優先度（小さいほど上位）。省略時は配列内の並び順で決まる。
+  tieBreakPriority?: number;
 }
 
 /**
@@ -54,21 +56,27 @@ export interface RankAndChipsResult {
 
 /**
  * 素点降順で順位付けし、固定チップ表からチップを算出する。
- * 同点がある場合は hasTie=true を返し、順位はスコア降順・安定ソートで暫定的に割り振る
- * (呼び出し側で「同点です。順位を確認してください」等の警告を出す想定)。
+ * 同点の場合は tieBreakPriority（小さいほど上位）で順序を決める。指定がなければ配列内の並び順
+ * （安定ソート）で暫定的に割り振る。同点があった場合は常に hasTie=true を返す
+ * (呼び出し側で「同点です。順位を確認してください」等の警告を出す想定。tieBreakPriorityを
+ * 明示的に指定していても、同点であること自体は変わらないため警告と確定操作は必要)。
  */
 export function computeRankAndChips(scores: PlayerScore[]): RankAndChipsResult {
   if (scores.length === 0) {
     return { ranked: [], hasTie: false };
   }
 
-  const sorted = [...scores].sort((a, b) => b.rawScore - a.rawScore);
+  const indexed = scores.map((s, i) => ({ ...s, _i: i }));
+  const sorted = indexed.sort((a, b) => {
+    if (b.rawScore !== a.rawScore) return b.rawScore - a.rawScore;
+    return (a.tieBreakPriority ?? a._i) - (b.tieBreakPriority ?? b._i);
+  });
   const hasTie = sorted.some((s, i) => i > 0 && s.rawScore === sorted[i - 1]!.rawScore);
 
   const ranked: RankedScore[] = sorted.map((s, i) => {
     const rank = i + 1;
     const rankChip = RANK_CHIP_TABLE[rank] ?? 0;
-    return { ...s, rank, rankChip };
+    return { playerId: s.playerId, rawScore: s.rawScore, rank, rankChip };
   });
 
   return { ranked, hasTie };

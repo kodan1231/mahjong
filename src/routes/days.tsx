@@ -312,14 +312,18 @@ dayRoutes.get("/", async (c) => {
   const admin = await isAdmin(c);
 
   const [openDay] = await db.select().from(days).where(eq(days.status, "open"));
+  // 進行中の対局日が無ければ、直近（最新）の対局日を代わりに表示する。
+  const [targetDay] = openDay
+    ? [openDay]
+    : await db.select().from(days).orderBy(desc(days.date), desc(days.id)).limit(1);
 
-  if (!openDay) {
+  if (!targetDay) {
     return c.html(
-      <Layout title="当日の成績" isAdmin={admin}>
+      <Layout title="直近の成績" isAdmin={admin}>
         <TabBar active="today" />
-        <h1>当日の成績</h1>
+        <h1>直近の成績</h1>
         <div class="card">
-          <p>現在進行中の対局日はありません。</p>
+          <p>まだ対局日がありません。</p>
           {admin && (
             <p>
               <a class="btn" href="/days/new">
@@ -332,20 +336,20 @@ dayRoutes.get("/", async (c) => {
     );
   }
 
-  const data = await loadDayDetail(db, openDay.id);
+  const data = await loadDayDetail(db, targetDay.id);
   if (!data) return c.notFound();
 
   return c.html(
-    <Layout title="当日の成績" isAdmin={admin}>
+    <Layout title="直近の成績" isAdmin={admin}>
       <TabBar active="today" />
       <h1>
-        当日の成績{" "}
+        直近の成績{" "}
         <small style="font-size:0.6em; color:var(--ink-soft)">
           （{data.day.date}
           {data.day.memo ? ` ${data.day.memo}` : ""}）
         </small>
       </h1>
-      <DayDetailBody dayId={openDay.id} admin={admin} data={data} />
+      <DayDetailBody dayId={targetDay.id} admin={admin} data={data} />
     </Layout>,
   );
 });
@@ -454,28 +458,16 @@ dayRoutes.get("/days/:id", async (c) => {
   const data = await loadDayDetail(db, dayId);
   if (!data) return c.notFound();
 
-  const autoRefresh = c.req.query("autorefresh") === "1";
   const year = Number(data.day.date.slice(0, 4));
 
   return c.html(
-    <Layout
-      title={`${data.day.date} の対局`}
-      isAdmin={admin}
-      extraHead={autoRefresh ? <meta http-equiv="refresh" content={`20;url=/days/${dayId}?autorefresh=1`} /> : undefined}
-    >
+    <Layout title={`${data.day.date} の対局`} isAdmin={admin}>
       <p>
         <a href={`/years/${year}`}>← {year}年の一覧に戻る</a>
       </p>
       <h1>
         {data.day.date} {data.day.memo ? `(${data.day.memo})` : ""}
       </h1>
-      <p>
-        {autoRefresh ? (
-          <a href={`/days/${dayId}`}>自動更新を止める</a>
-        ) : (
-          <a href={`/days/${dayId}?autorefresh=1`}>自動更新ON（20秒ごと。みんなで見る用）</a>
-        )}
-      </p>
       <DayDetailBody dayId={dayId} admin={admin} data={data} />
     </Layout>,
   );
@@ -699,7 +691,7 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
       )}
       {tieWarning && (
         <p class="warning">
-          同点です。ポイントを調整して同点を解消するか、下のチェックを入れて座席の並び順（左の座席ほど上位）で仮の着順を確定してください。
+          同点です。ポイントを調整して同点を解消するか、各座席の「同点時の順位」でどちらが上位かを選び、下のチェックを入れて確定してください。
         </p>
       )}
       <p>
@@ -745,12 +737,26 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
                   <input type="checkbox" name={`hakoware_${r.seatIndex}`} checked={r.isHakoware} /> 箱割れ
                 </label>
               </div>
+              {tieWarning && (
+                <div class="seat-row">
+                  <label style="font-weight:normal">
+                    同点時の順位:{" "}
+                    <select name={`tiebreak_${r.seatIndex}`}>
+                      {[1, 2, 3, 4].map((n) => (
+                        <option value={n} selected={n === r.seatIndex + 1}>
+                          {n}位
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
             </div>
           );
         })}
         {tieWarning && (
           <label style="font-weight:normal">
-            <input type="checkbox" name="acceptTie" value="1" /> 同点のまま座席順で仮に確定する
+            <input type="checkbox" name="acceptTie" value="1" /> 同点のまま上で選んだ順位で確定する
           </label>
         )}
         <button class="btn" type="submit">
@@ -773,6 +779,7 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
     playerId: Number(body[`player_${seatIndex}`]),
     rawScore: Number(body[`score_${seatIndex}`]),
     isHakoware: body[`hakoware_${seatIndex}`] === "on",
+    tieBreakPriority: body[`tiebreak_${seatIndex}`] != null ? Number(body[`tiebreak_${seatIndex}`]) : undefined,
   }));
 
   const acceptTie = body.acceptTie === "1";
@@ -789,7 +796,7 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
   }
 
   const { ranked, hasTie } = computeRankAndChips(
-    seatInputs.map(({ playerId, rawScore }) => ({ playerId, rawScore })),
+    seatInputs.map(({ playerId, rawScore, tieBreakPriority }) => ({ playerId, rawScore, tieBreakPriority })),
   );
 
   if (hasTie && !acceptTie) {
@@ -960,8 +967,51 @@ dayRoutes.get("/days/:id/edit", requireAdmin, async (c) => {
           </button>
         </form>
       </div>
+      <div class="card">
+        <h2>対局日の削除</h2>
+        <p>この対局日の半荘・スコア・役満・局メモ・写真をすべて削除します。登録を間違えた対局日を消す場合に使ってください。この操作は取り消せません。</p>
+        <form
+          method="post"
+          action={`/days/${dayId}/delete`}
+          onsubmit="return confirm('この対局日のデータをすべて削除します。よろしいですか？（元に戻せません）')"
+        >
+          <button class="btn btn-danger" type="submit">
+            この対局日を削除する
+          </button>
+        </form>
+      </div>
     </Layout>,
   );
+});
+
+dayRoutes.post("/days/:id/delete", requireAdmin, async (c) => {
+  const dayId = Number(c.req.param("id"));
+  const db = getDb(c.env);
+
+  const [day] = await db.select().from(days).where(eq(days.id, dayId));
+  if (!day) return c.notFound();
+
+  const sessions = await db.select({ id: gameSessions.id }).from(gameSessions).where(eq(gameSessions.dayId, dayId));
+  const sessionIds = sessions.map((s) => s.id);
+
+  if (sessionIds.length > 0) {
+    await db.delete(sessionScores).where(inArray(sessionScores.gameSessionId, sessionIds));
+    await db.delete(handLogs).where(inArray(handLogs.gameSessionId, sessionIds));
+    await db.delete(photoUploads).where(inArray(photoUploads.gameSessionId, sessionIds));
+  }
+
+  const yakumanRows = await db.select({ id: yakumanEvents.id }).from(yakumanEvents).where(eq(yakumanEvents.dayId, dayId));
+  const yakumanIds = yakumanRows.map((y) => y.id);
+  if (yakumanIds.length > 0) {
+    await db.delete(yakumanEventTargets).where(inArray(yakumanEventTargets.yakumanEventId, yakumanIds));
+  }
+  await db.delete(yakumanEvents).where(eq(yakumanEvents.dayId, dayId));
+
+  await db.delete(gameSessions).where(eq(gameSessions.dayId, dayId));
+  await db.delete(dayParticipants).where(eq(dayParticipants.dayId, dayId));
+  await db.delete(days).where(eq(days.id, dayId));
+
+  return c.redirect("/");
 });
 
 dayRoutes.post("/days/:id/edit", requireAdmin, async (c) => {
@@ -1043,12 +1093,6 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
   return c.html(
     <Layout title="まとめて入力" isAdmin={true}>
       <h1>{day.date}: まとめて入力</h1>
-      <p>
-        行＝半荘、列＝参加者。1半荘につき4人分の「配給原点からの増減（ポイント）」を入力してください（例:
-        +7, 0, -3, -4のように、4人の合計が必ず0になります）。
-        箱割れの場合はマイナスがさらに深くなります（-{ORIGIN_SCORE}を超えると自動で「箱割れ」として記録します）。
-        役満・局メモは<a href={`/days/${dayId}`}>対局日の詳細ページ</a>から編集してください。
-      </p>
       {partialSeqs.length > 0 && (
         <p class="warning">
           第{partialSeqs.join("・")}回は4人分そろっていないため保存されませんでした。確認して入力し直してください。

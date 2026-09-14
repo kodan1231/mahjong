@@ -5,28 +5,31 @@ import {
   computeYakumanChips,
 } from "../src/lib/scoring";
 
+// アプリ全体の点数単位は「ポイント」（実際の素点÷1000。例: 素点32000点 → 32ポイント）。
+
 describe("normalizeRawScore", () => {
-  it("returns the value as-is in raw mode", () => {
-    expect(normalizeRawScore(32000, "raw")).toBe(32000);
+  it("rawモード: 素点（画面表示そのまま）を1000で割ってポイントに変換する", () => {
+    expect(normalizeRawScore(32000, "raw")).toBe(32);
+    expect(normalizeRawScore(24700, "raw")).toBe(24.7); // 100点単位の端数もそのまま反映される
   });
 
-  it("treats the diff-mode display value as 1000-point units before adding the origin", () => {
-    expect(normalizeRawScore(7, "diff")).toBe(32000);
-    expect(normalizeRawScore(-3.5, "diff")).toBe(21500);
+  it("diffモード: 表示値は既にポイント単位の差分なので、originにそのまま加算する", () => {
+    expect(normalizeRawScore(7, "diff")).toBe(32);
+    expect(normalizeRawScore(-3.5, "diff")).toBe(21.5);
   });
 
   it("supports a custom origin", () => {
-    expect(normalizeRawScore(5, "diff", 30000)).toBe(35000);
+    expect(normalizeRawScore(5, "diff", 30)).toBe(35);
   });
 });
 
 describe("computeRankAndChips", () => {
-  it("ranks by raw score descending and assigns fixed chips", () => {
+  it("ranks by point score descending and assigns fixed chips", () => {
     const { ranked, hasTie } = computeRankAndChips([
-      { playerId: 1, rawScore: 25000 },
-      { playerId: 2, rawScore: 40000 },
-      { playerId: 3, rawScore: 15000 },
-      { playerId: 4, rawScore: 20000 },
+      { playerId: 1, rawScore: 25 },
+      { playerId: 2, rawScore: 40 },
+      { playerId: 3, rawScore: 15 },
+      { playerId: 4, rawScore: 20 },
     ]);
 
     expect(hasTie).toBe(false);
@@ -37,20 +40,20 @@ describe("computeRankAndChips", () => {
 
   it("sums to zero across the four fixed chip values", () => {
     const { ranked } = computeRankAndChips([
-      { playerId: 1, rawScore: 10000 },
-      { playerId: 2, rawScore: 20000 },
-      { playerId: 3, rawScore: 30000 },
-      { playerId: 4, rawScore: 40000 },
+      { playerId: 1, rawScore: 10 },
+      { playerId: 2, rawScore: 20 },
+      { playerId: 3, rawScore: 30 },
+      { playerId: 4, rawScore: 40 },
     ]);
     expect(ranked.reduce((sum, r) => sum + r.rankChip, 0)).toBe(0);
   });
 
   it("flags ties without crashing", () => {
     const { hasTie, ranked } = computeRankAndChips([
-      { playerId: 1, rawScore: 25000 },
-      { playerId: 2, rawScore: 25000 },
-      { playerId: 3, rawScore: 20000 },
-      { playerId: 4, rawScore: 30000 },
+      { playerId: 1, rawScore: 25 },
+      { playerId: 2, rawScore: 25 },
+      { playerId: 3, rawScore: 20 },
+      { playerId: 4, rawScore: 30 },
     ]);
     expect(hasTie).toBe(true);
     expect(ranked).toHaveLength(4);

@@ -14,13 +14,15 @@ authRoutes.get("/login", async (c) => {
     <Layout title="管理者ログイン" isAdmin={false}>
       <h1>管理者ログイン</h1>
       {error && <p class="warning">パスワードが違います</p>}
-      <form class="stack" method="post" action="/login">
-        <label for="password">共有パスワード</label>
-        <input type="password" id="password" name="password" required autofocus />
-        <button class="btn" type="submit">
-          ログイン
-        </button>
-      </form>
+      <div class="card">
+        <form class="stack" method="post" action="/login">
+          <label for="password">共有パスワード</label>
+          <input type="password" id="password" name="password" required autofocus />
+          <button class="btn" type="submit">
+            ログイン
+          </button>
+        </form>
+      </div>
     </Layout>,
   );
 });

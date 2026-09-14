@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, blob, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, blob, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const players = sqliteTable("players", {
@@ -46,7 +46,8 @@ export const sessionScores = sqliteTable(
     gameSessionId: integer("game_session_id").notNull().references(() => gameSessions.id),
     seatIndex: integer("seat_index").notNull(), // 0-3
     playerId: integer("player_id").notNull().references(() => players.id),
-    rawScore: integer("raw_score"), // null until confirmed
+    // 「ポイント」単位（実際の素点÷1000。例: 素点32000点 → 32ポイント）で保存する。null until confirmed
+    rawScore: real("raw_score"),
     isHakoware: integer("is_hakoware", { mode: "boolean" }).notNull().default(false),
     rank: integer("rank"), // 1-4, null until confirmed
     rankChip: integer("rank_chip"), // null until confirmed

@@ -1,10 +1,16 @@
-export const Signed = ({ n, unit = "" }: { n: number; unit?: string }) => (
-  <span class={n >= 0 ? "plus" : "minus"}>
-    {n >= 0 ? "+" : ""}
-    {n}
-    {unit}
-  </span>
-);
+// ポイントは0.1刻みの小数になりうるため、合計時の浮動小数点誤差（24.700000000000003等）を防ぐために丸める。
+const cleanNumber = (n: number) => Math.round(n * 10) / 10;
+
+export const Signed = ({ n, unit = "" }: { n: number; unit?: string }) => {
+  const v = cleanNumber(n);
+  return (
+    <span class={v >= 0 ? "plus" : "minus"}>
+      {v >= 0 ? "+" : ""}
+      {v}
+      {unit}
+    </span>
+  );
+};
 
 // チップ合計はあくまで付録情報のため一覧には出さず、個別成績ページ（/players/:id）でのみ表示する。
 export const TotalsTable = ({
@@ -16,7 +22,7 @@ export const TotalsTable = ({
     <thead>
       <tr>
         <th>プレイヤー</th>
-        <th>素点合計</th>
+        <th>ポイント合計</th>
       </tr>
     </thead>
     <tbody>

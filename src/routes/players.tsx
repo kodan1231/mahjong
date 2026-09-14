@@ -51,13 +51,15 @@ playerRoutes.get("/players", requireAdmin, async (c) => {
       </div>
 
       <h2>プレイヤーを追加</h2>
-      <form class="stack" method="post" action="/players">
-        <label for="name">名前</label>
-        <input type="text" id="name" name="name" required />
-        <button class="btn" type="submit">
-          追加
-        </button>
-      </form>
+      <div class="card">
+        <form class="stack" method="post" action="/players">
+          <label for="name">名前</label>
+          <input type="text" id="name" name="name" required />
+          <button class="btn" type="submit">
+            追加
+          </button>
+        </form>
+      </div>
     </Layout>,
   );
 });

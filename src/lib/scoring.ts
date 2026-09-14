@@ -1,4 +1,8 @@
-export const ORIGIN_SCORE = 25000;
+/**
+ * アプリ全体で使う点数の単位は「ポイント」（実際の素点÷1000。例: 素点32000点 → 32ポイント）。
+ * 配給原点は素点25000点 = 25ポイント。
+ */
+export const ORIGIN_SCORE = 25;
 
 // 着順ごとの固定チップ (1位+3 / 2位0 / 3位-1 / 4位-2)
 const RANK_CHIP_TABLE: Record<number, number> = { 1: 3, 2: 0, 3: -1, 4: -2 };
@@ -6,17 +10,19 @@ const RANK_CHIP_TABLE: Record<number, number> = { 1: 3, 2: 0, 3: -1, 4: -2 };
 export type DisplayMode = "raw" | "diff";
 
 /**
- * 点数表示機のOCR値を素点に正規化する。
- * diffモード（配給原点からの±差分表示）の場合、表示されている数値は1000点単位
- * （麻雀の慣習で「25000点」を「25」と表すのと同じ）なので、1000倍してから
- * originに加算する。例: 表示が"+18"なら 25000 + 18*1000 = 43000。
+ * 点数表示機のOCR値をポイント単位に正規化する。
+ * - rawモード（素点そのまま表示）: 表示されている数値は「素点」（例: 32000）なので、
+ *   1000で割ってポイントに変換する（32000 → 32）。麻雀の素点は100点単位で丸められるため
+ *   小数第1位までに丸める。
+ * - diffモード（配給原点からの±差分表示）: 表示されている数値は既に「ポイント」単位の
+ *   差分（例: "+7"は+7ポイント=+7000点）なので、そのままoriginに加算するだけでよい。
  */
 export function normalizeRawScore(
   ocrValue: number,
   displayMode: DisplayMode,
   origin: number = ORIGIN_SCORE,
 ): number {
-  return displayMode === "diff" ? origin + ocrValue * 1000 : ocrValue;
+  return displayMode === "diff" ? origin + ocrValue : Math.round(ocrValue / 100) / 10;
 }
 
 export interface PlayerScore {

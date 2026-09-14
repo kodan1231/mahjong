@@ -109,7 +109,7 @@ statsRoutes.get("/players/:id", async (c) => {
       <div class="card">
         <h2>通算</h2>
         <p>
-          素点合計: <Signed n={mine?.rawTotal ?? 0} /> ／ チップ合計: <Signed n={mine?.chipTotal ?? 0} /> ／ 半荘数:{" "}
+          ポイント合計: <Signed n={mine?.rawTotal ?? 0} /> ／ チップ合計: <Signed n={mine?.chipTotal ?? 0} /> ／ 半荘数:{" "}
           {gameCount}
         </p>
         <Sparkline points={history.map((h) => h.cumulativeRaw)} />
@@ -123,7 +123,7 @@ statsRoutes.get("/players/:id", async (c) => {
             <thead>
               <tr>
                 <th>年</th>
-                <th>素点合計</th>
+                <th>ポイント合計</th>
                 <th>チップ合計</th>
               </tr>
             </thead>

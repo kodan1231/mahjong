@@ -77,7 +77,9 @@ const css = `
       radial-gradient(circle at 80% 60%, rgba(255,255,255,0.04) 0, transparent 45%),
       linear-gradient(160deg, var(--felt) 0%, var(--felt-dark) 100%);
     background-attachment: fixed;
-    color: var(--ink);
+    /* 緑フェルトの上に直接乗る文字は明るい色をデフォルトにする（濃緑背景×黒文字で見えなくなるのを防ぐ）。
+       白系のカード・テーブルの中は .card / table のルールで濃色に戻す。 */
+    color: #eef2ec;
     min-height: 100vh;
     line-height: 1.5;
   }
@@ -140,7 +142,8 @@ const css = `
   .app-main { max-width: 760px; margin: 0 auto; padding: 14px 14px 40px; }
 
   h1 { font-size: 1.35rem; color: #fdf9ec; margin: 4px 0 12px; letter-spacing: 0.01em; }
-  h2 { font-size: 1.08rem; margin-top: 1.1em; color: var(--ink); }
+  /* h2/h3は緑背景に直接置かれることもカードの中に置かれることもあるため、色は指定せず親から継承する */
+  h2 { font-size: 1.08rem; margin-top: 1.1em; }
   h3 { font-size: 1.02rem; }
 
   .tab-bar {
@@ -164,7 +167,7 @@ const css = `
   }
   .tab.active { background: var(--gold); color: #2a2306; }
 
-  table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; color: var(--ink); }
   th, td { padding: 7px 5px; border-bottom: 1px solid var(--tile-edge); text-align: right; font-variant-numeric: tabular-nums; }
   th:first-child, td:first-child { text-align: left; }
   th { color: var(--ink-soft); font-weight: 600; font-size: 0.82rem; }
@@ -176,6 +179,7 @@ const css = `
     padding: 14px;
     margin-bottom: 14px;
     box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+    color: var(--ink);
   }
   .card h2:first-child, .card h3:first-child { margin-top: 0; }
 
@@ -197,18 +201,20 @@ const css = `
   .btn-danger { background: var(--minus); color: white; }
 
   form.stack { display: flex; flex-direction: column; gap: 10px; max-width: 440px; }
-  label { font-size: 0.88rem; font-weight: 700; color: var(--ink); }
+  /* labelも緑背景・カード両方に置かれるので色は継承させる */
+  label { font-size: 0.88rem; font-weight: 700; }
   input[type=text], input[type=password], input[type=number], select, textarea {
     padding: 10px; border-radius: 8px; border: 1px solid var(--tile-edge); font-size: 1rem; width: 100%;
     background: white; color: var(--ink);
   }
   input:focus, select:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
 
-  .seat-block { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px dashed var(--tile-edge); }
+  .seat-block { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.25); }
   .seat-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
-  .seat-row .seat-label { width: 4em; font-weight: 700; color: var(--ink-soft); flex-shrink: 0; }
+  .seat-row .seat-label { width: 4em; font-weight: 700; flex-shrink: 0; opacity: 0.85; }
   .seat-row select { flex: 1 1 8em; }
   .seat-row input[type=number] { flex: 1 1 6em; }
+  .card .seat-block { border-bottom-color: var(--tile-edge); }
 
   /* ボタン風の選択肢（座席登録・確認画面のプレイヤー選択）。1行に収まるよう横スクロールにする。 */
   .choice-group {
@@ -263,7 +269,7 @@ const css = `
   .card a:hover, table a:hover { color: var(--gold-dark); }
   .app-main > p > a, .card > p > a { text-decoration: none; }
 
-  details summary { cursor: pointer; font-weight: 700; color: var(--ink); margin-top: 12px; }
+  details summary { cursor: pointer; font-weight: 700; margin-top: 12px; }
 
   /* まとめて入力（スプレッドシート風グリッド） */
   .sheet-table { width: auto; border-collapse: collapse; background: white; }

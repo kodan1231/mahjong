@@ -137,7 +137,7 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
               <thead>
                 <tr>
                   <th>プレイヤー</th>
-                  <th>素点</th>
+                  <th>ポイント</th>
                   <th>着順</th>
                   <th>チップ</th>
                 </tr>
@@ -369,24 +369,26 @@ dayRoutes.get("/days/new", requireAdmin, async (c) => {
           ）。<strong>今日の日付</strong>で開始する場合は先に終了してください。過去の日付を追加登録する場合はそのまま下のフォームで登録できます。
         </p>
       )}
-      <form class="stack" method="post" action="/days">
-        <label for="date">日付</label>
-        <input type="date" id="date" name="date" value={today} required />
+      <div class="card">
+        <form class="stack" method="post" action="/days">
+          <label for="date">日付</label>
+          <input type="date" id="date" name="date" value={today} required />
 
-        <label for="memo">メモ（任意）</label>
-        <input type="text" id="memo" name="memo" />
+          <label for="memo">メモ（任意）</label>
+          <input type="text" id="memo" name="memo" />
 
-        <label>参加者</label>
-        {activePlayers.map((p) => (
-          <label style="font-weight:normal">
-            <input type="checkbox" name="playerIds" value={p.id} /> {p.name}
-          </label>
-        ))}
+          <label>参加者</label>
+          {activePlayers.map((p) => (
+            <label style="font-weight:normal">
+              <input type="checkbox" name="playerIds" value={p.id} /> {p.name}
+            </label>
+          ))}
 
-        <button class="btn" type="submit">
-          登録する
-        </button>
-      </form>
+          <button class="btn" type="submit">
+            登録する
+          </button>
+        </form>
+      </div>
     </Layout>,
   );
 });
@@ -496,34 +498,36 @@ dayRoutes.get("/days/:id/sessions/new", requireAdmin, async (c) => {
     <Layout title="半荘を登録" isAdmin={true}>
       <h1>第{nextSeq}半荘: 座席を登録</h1>
       <p>管理者から見た座席順（点数表示機に数字が並ぶ順序）でプレイヤーを選んでください。</p>
-      <form class="stack" method="post" action={`/days/${dayId}/sessions`}>
-        {[0, 1, 2, 3].map((seat) => (
-          <div class="seat-row">
-            <span class="seat-label">座席{seat + 1}</span>
-            <div class="choice-group">
-              {participants.map((p) => (
-                <label class="choice-btn">
-                  <input type="radio" name={`seat${seat}`} value={p.playerId} required />
-                  {p.name}
-                </label>
-              ))}
+      <div class="card">
+        <form class="stack" method="post" action={`/days/${dayId}/sessions`}>
+          {[0, 1, 2, 3].map((seat) => (
+            <div class="seat-row">
+              <span class="seat-label">座席{seat + 1}</span>
+              <div class="choice-group">
+                {participants.map((p) => (
+                  <label class="choice-btn">
+                    <input type="radio" name={`seat${seat}`} value={p.playerId} required />
+                    {p.name}
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
 
-        <label>表示形式</label>
-        <label style="font-weight:normal">
-          <input type="radio" name="displayMode" value="raw" checked={lastMode === "raw"} /> 素点をそのまま表示
-        </label>
-        <label style="font-weight:normal">
-          <input type="radio" name="displayMode" value="diff" checked={lastMode === "diff"} /> 配給原点({ORIGIN_SCORE}
-          )からの±差分表示
-        </label>
+          <label>表示形式</label>
+          <label style="font-weight:normal">
+            <input type="radio" name="displayMode" value="raw" checked={lastMode === "raw"} /> 素点をそのまま表示
+          </label>
+          <label style="font-weight:normal">
+            <input type="radio" name="displayMode" value="diff" checked={lastMode === "diff"} /> 配給原点(
+            {ORIGIN_SCORE})からの±差分表示
+          </label>
 
-        <button class="btn" type="submit">
-          登録して撮影へ
-        </button>
-      </form>
+          <button class="btn" type="submit">
+            登録して撮影へ
+          </button>
+        </form>
+      </div>
     </Layout>,
   );
 });
@@ -682,10 +686,11 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
   return c.html(
     <Layout title="点数を確認" isAdmin={true}>
       <h1>第{session.seq}半荘: 点数を確認</h1>
-      {tieWarning && <p class="warning">同点です。順位を確認してください（素点を調整するか、そのまま確定できます）。</p>}
+      {tieWarning && <p class="warning">同点です。順位を確認してください（ポイントを調整するか、そのまま確定できます）。</p>}
       <p>
-        表示形式:{" "}
-        {displayMode === "diff" ? `配給原点(${ORIGIN_SCORE})からの±差分` : "素点そのまま"}
+        点数表示機の表示形式:{" "}
+        {displayMode === "diff" ? `配給原点(${ORIGIN_SCORE}ポイント)からの±差分` : "素点をそのまま表示"}
+        （入力欄は自動的にポイント単位に変換されます）
         {latestPhoto && (
           <>
             {" ／ "}
@@ -695,6 +700,7 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
           </>
         )}
       </p>
+      <div class="card">
       <form class="stack" method="post" action={`/days/${dayId}/sessions/${sessionId}/confirm`}>
         {rows.map((r) => {
           const ocrRaw = ocrValues[r.seatIndex];
@@ -719,7 +725,7 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
                 </div>
               </div>
               <div class="seat-row">
-                <input type="number" name={`score_${r.seatIndex}`} value={String(prefill)} required />
+                <input type="number" step="0.1" name={`score_${r.seatIndex}`} value={String(prefill)} required />
                 <label style="font-weight:normal">
                   <input type="checkbox" name={`hakoware_${r.seatIndex}`} checked={r.isHakoware} /> 箱割れ
                 </label>
@@ -731,6 +737,7 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
           確定
         </button>
       </form>
+      </div>
     </Layout>,
   );
 });
@@ -899,25 +906,27 @@ dayRoutes.get("/days/:id/edit", requireAdmin, async (c) => {
   return c.html(
     <Layout title="対局日を編集" isAdmin={true}>
       <h1>対局日を編集</h1>
-      <form class="stack" method="post" action={`/days/${dayId}/edit`}>
-        <label for="date">日付</label>
-        <input type="date" id="date" name="date" value={day.date} required />
+      <div class="card">
+        <form class="stack" method="post" action={`/days/${dayId}/edit`}>
+          <label for="date">日付</label>
+          <input type="date" id="date" name="date" value={day.date} required />
 
-        <label for="memo">メモ（任意）</label>
-        <input type="text" id="memo" name="memo" value={day.memo ?? ""} />
+          <label for="memo">メモ（任意）</label>
+          <input type="text" id="memo" name="memo" value={day.memo ?? ""} />
 
-        <label>参加者</label>
-        {allPlayers.map((p) => (
-          <label style="font-weight:normal">
-            <input type="checkbox" name="playerIds" value={p.id} checked={currentIds.has(p.id)} /> {p.name}
-            {!p.active ? "（無効化済み）" : ""}
-          </label>
-        ))}
+          <label>参加者</label>
+          {allPlayers.map((p) => (
+            <label style="font-weight:normal">
+              <input type="checkbox" name="playerIds" value={p.id} checked={currentIds.has(p.id)} /> {p.name}
+              {!p.active ? "（無効化済み）" : ""}
+            </label>
+          ))}
 
-        <button class="btn" type="submit">
-          保存
-        </button>
-      </form>
+          <button class="btn" type="submit">
+            保存
+          </button>
+        </form>
+      </div>
     </Layout>,
   );
 });
@@ -960,7 +969,7 @@ dayRoutes.post("/days/:id/edit", requireAdmin, async (c) => {
 
 // ---------- まとめて入力（スプレッドシート風の一括登録・過去履歴のバックフィル向け） ----------
 // 半荘ごとの座席登録→撮影→確認、という通常フローとは別に、
-// 「行＝半荘、列＝参加者」の表に直接素点を入力して一括保存できる画面。
+// 「行＝半荘、列＝参加者」の表に直接ポイント（素点÷1000）を入力して一括保存できる画面。
 // 箱割れ・役満・局メモはここでは扱わず、通常の対局日詳細ページから編集する。
 
 const SHEET_EXTRA_BLANK_ROWS = 5;
@@ -998,7 +1007,7 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
     <Layout title="まとめて入力" isAdmin={true}>
       <h1>{day.date}: まとめて入力</h1>
       <p>
-        行＝半荘、列＝参加者。1半荘につき4人分の素点を入力してください（同点・3人以下の入力は保存されません）。
+        行＝半荘、列＝参加者。1半荘につき4人分のポイント（素点÷1000、例: 32000点なら32）を入力してください（同点・3人以下の入力は保存されません）。
         箱割れ・役満・局メモは<a href={`/days/${dayId}`}>対局日の詳細ページ</a>から編集してください。
       </p>
       {skippedSeqs.length > 0 && (
@@ -1032,6 +1041,7 @@ dayRoutes.get("/days/:id/sheet", requireAdmin, async (c) => {
                         <td>
                           <input
                             type="number"
+                            step="0.1"
                             name={`score_${seq}_${p.playerId}`}
                             value={existing?.rawScore != null ? String(existing.rawScore) : ""}
                           />

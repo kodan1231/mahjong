@@ -36,6 +36,8 @@ export const gameSessions = sqliteTable("game_sessions", {
   status: text("status", { enum: ["pending", "confirmed"] }).notNull().default("pending"),
   displayMode: text("display_mode", { enum: ["raw", "diff"] }).notNull().default("raw"),
   playedAt: text("played_at"),
+  // 小計ブロック（複数半荘分をまとめて登録する行）の任意ラベル。例:「前半」。通常の半荘では未使用
+  memo: text("memo"),
   createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
 });
 

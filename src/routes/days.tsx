@@ -101,7 +101,6 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
   return (
     <>
       <p>
-        参加者: {participants.map((p) => p.name).join(" / ")}{" "}
         <span class={`badge ${day.status === "open" ? "badge-open" : "badge-closed"}`}>
           {day.status === "open" ? "対局中" : "終了"}
         </span>
@@ -132,10 +131,14 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
       {sessions.map((s) => {
         const rows = allScores.filter((r) => r.gameSessionId === s.id).sort((a, b) => a.seatIndex - b.seatIndex);
         const hands = allHands.filter((h) => h.gameSessionId === s.id);
+        // 「まとめて入力」の小計ブロックで登録した行は、着順は計算せずチップだけ手入力した値を
+        // そのまま保存している（rank===null かつ rankChip!==nullが目印）。通常の半荘確認画面で
+        // 編集すると着順・チップが自動計算で上書きされてしまうため、編集リンクは出さない。
+        const isSubtotalBlock = rows.length > 0 && rows.every((r) => r.rank == null) && rows.some((r) => r.rankChip != null);
         return (
           <div class="card">
             <h3>
-              第{s.seq}半荘{" "}
+              {isSubtotalBlock ? `小計${s.memo ? `（${s.memo}）` : ""}` : `第${s.seq}半荘`}{" "}
               <span class={`badge ${s.status === "confirmed" ? "badge-confirmed" : "badge-pending"}`}>
                 {s.status === "confirmed" ? "確定済み" : "撮影待ち"}
               </span>
@@ -194,7 +197,11 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
 
             {admin && (
               <p style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
-                {s.status === "pending" ? (
+                {isSubtotalBlock ? (
+                  <span style="font-size:0.85rem; color:var(--ink-soft)">
+                    小計ブロックのため個別編集はできません。修正する場合は削除してから「まとめて入力」の小計欄で入力し直してください。
+                  </span>
+                ) : s.status === "pending" ? (
                   <a class="btn" href={`/days/${dayId}/sessions/${s.id}/capture`}>
                     点数表示機を撮影する
                   </a>
@@ -1077,6 +1084,9 @@ async function renderSheetPage(
     partialSeqs?: number[];
     tiedSeqs?: number[];
     badSumSeqs?: number[];
+    subtotalOverrides?: Map<string, string>;
+    subtotalBlockCount?: number;
+    subtotalWarnings?: string[];
   } = {},
 ) {
   const db = getDb(c.env);
@@ -1109,6 +1119,9 @@ async function renderSheetPage(
   const tiedSeqs = opts.tiedSeqs ?? [];
   const badSumSeqs = opts.badSumSeqs ?? [];
   const overrides = opts.overrides;
+  const subtotalOverrides = opts.subtotalOverrides;
+  const subtotalBlockCount = opts.subtotalBlockCount ?? 1;
+  const subtotalWarnings = opts.subtotalWarnings ?? [];
 
   return c.html(
     <Layout title="まとめて入力" isAdmin={true}>
@@ -1174,6 +1187,65 @@ async function renderSheetPage(
               ＋ 行を追加
             </button>
           </p>
+
+          <div class="card" style="background:transparent; border-style:dashed">
+            <h2>小計をまとめて入力</h2>
+            <p style="font-size:0.85rem; color:var(--ink-soft)">
+              半荘ごとの内訳が分からない期間（複数半荘分をまとめた小計しか残っていない場合）はこちら。
+              ポイントとチップを両方とも直接入力します（着順の自動計算はしません）。「前半は小計・後半は上の表で半荘ごと」のように混在させても構いません。
+            </p>
+            {subtotalWarnings.map((w) => (
+              <p class="warning">{w}</p>
+            ))}
+            <div id="subtotal-blocks">
+              {Array.from({ length: subtotalBlockCount }).map((_, i) => {
+                const idx = i + 1;
+                const labelValue = subtotalOverrides?.get(`label_${idx}`) ?? "";
+                return (
+                  <div class="subtotal-block" data-idx={idx} style="border:1px solid var(--tile-edge); border-radius:10px; padding:10px; margin-bottom:10px">
+                    <div class="seat-row">
+                      <input
+                        type="text"
+                        name={`subtotal_label_${idx}`}
+                        placeholder="ラベル（任意、例: 前半）"
+                        value={labelValue}
+                        style="max-width:14em"
+                      />
+                    </div>
+                    {participants.map((p) => {
+                      const pointValue = subtotalOverrides?.get(`point_${idx}_${p.playerId}`) ?? "";
+                      const chipValue = subtotalOverrides?.get(`chip_${idx}_${p.playerId}`) ?? "";
+                      return (
+                        <div class="seat-row">
+                          <span class="seat-label">{p.name}</span>
+                          <input
+                            type="number"
+                            step="0.1"
+                            name={`subtotal_point_${idx}_${p.playerId}`}
+                            placeholder="ポイント"
+                            value={pointValue}
+                          />
+                          <input
+                            type="number"
+                            step="1"
+                            name={`subtotal_chip_${idx}_${p.playerId}`}
+                            placeholder="チップ"
+                            value={chipValue}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+            <p>
+              <button type="button" id="add-subtotal-btn" class="btn btn-secondary">
+                ＋ 小計ブロックを追加
+              </button>
+            </p>
+          </div>
+
           {tiedSeqs.length > 0 && (
             <label style="font-weight:normal; display:block; margin-bottom:10px">
               <input type="checkbox" name="acceptTies" value="1" /> 同点の回を入力順で仮に確定する
@@ -1207,6 +1279,21 @@ async function renderSheetPage(
                 input.name = input.name.replace(/^score_\\d+_/, 'score_' + newSeq + '_');
               });
               sheetTbody.appendChild(newRow);
+            });
+
+            const subtotalBlocks = document.getElementById('subtotal-blocks');
+            document.getElementById('add-subtotal-btn').addEventListener('click', () => {
+              const blocks = subtotalBlocks.querySelectorAll('.subtotal-block');
+              const lastBlock = blocks[blocks.length - 1];
+              const lastIdx = Number(lastBlock.dataset.idx);
+              const newIdx = lastIdx + 1;
+              const newBlock = lastBlock.cloneNode(true);
+              newBlock.dataset.idx = String(newIdx);
+              newBlock.querySelectorAll('input').forEach((input) => {
+                input.value = '';
+                input.name = input.name.replace(/^(subtotal_(?:label|point|chip)_)\\d+/, '$1' + newIdx);
+              });
+              subtotalBlocks.appendChild(newBlock);
             });
 
             // 数字入力欄では上下キーで値が増減してしまうデフォルト挙動を止め、
@@ -1370,10 +1457,116 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
     );
   }
 
-  // 全行成功した場合のみリダイレクト（二重送信防止のPost-Redirect-Getパターン）。
-  // 1行でも保存されなかった行があれば、リダイレクトせずこの場で描画し、
-  // 送信された入力値（submittedOverrides）をそのまま表示して入力し直しやすくする。
-  if (partialSeqs.length === 0 && tiedSeqs.length === 0 && badSumSeqs.length === 0) {
+  // ---------- 小計ブロック（半荘ごとの内訳が分からない期間のポイント・チップを直接入力する） ----------
+  // 通常行と違い着順・チップは自動計算せず、入力されたチップ値をそのまま rankChip に保存する
+  // （rankは常にnull。「rank===null かつ rankChip!==null」がこの小計ブロックの目印になる）。
+  // seqは通常行の続き番号から採番する（半荘一覧の末尾に並ぶ。前半だけ小計にした場合でも
+  // 表示順は末尾になる点に注意。詳細はCLAUDE.md参照）。
+  let maxBlockIdx = 0;
+  for (const key of Object.keys(body)) {
+    const m = key.match(/^subtotal_(?:label|point|chip)_(\d+)/);
+    if (m) maxBlockIdx = Math.max(maxBlockIdx, Number(m[1]));
+  }
+  maxBlockIdx = Math.max(maxBlockIdx, 1);
+
+  const subtotalOverrides = new Map<string, string>();
+  const subtotalWarnings: string[] = [];
+  let nextSeq = maxSeq + 1;
+
+  for (let idx = 1; idx <= maxBlockIdx; idx++) {
+    const labelRaw = body[`subtotal_label_${idx}`];
+    const label = typeof labelRaw === "string" ? labelRaw.trim() : "";
+    if (typeof labelRaw === "string") subtotalOverrides.set(`label_${idx}`, labelRaw);
+
+    const pointEntries: { playerId: number; rawScore: number }[] = [];
+    const chipEntries: { playerId: number; rawScore: number }[] = [];
+    let incomplete = false;
+    let anyInput = label.length > 0;
+
+    for (const playerId of participantIds) {
+      const rawPoint = body[`subtotal_point_${idx}_${playerId}`];
+      const rawChip = body[`subtotal_chip_${idx}_${playerId}`];
+      if (typeof rawPoint === "string") subtotalOverrides.set(`point_${idx}_${playerId}`, rawPoint);
+      if (typeof rawChip === "string") subtotalOverrides.set(`chip_${idx}_${playerId}`, rawChip);
+
+      const hasPoint = typeof rawPoint === "string" && rawPoint !== "";
+      const hasChip = typeof rawChip === "string" && rawChip !== "";
+      if (!hasPoint && !hasChip) continue;
+      anyInput = true;
+
+      const p = hasPoint ? Number(rawPoint) : NaN;
+      const ch = hasChip ? Number(rawChip) : NaN;
+      if (hasPoint && hasChip && Number.isFinite(p) && Number.isFinite(ch)) {
+        pointEntries.push({ playerId, rawScore: p });
+        chipEntries.push({ playerId, rawScore: ch });
+      } else {
+        incomplete = true;
+      }
+    }
+
+    if (!anyInput) continue; // 未使用のブロックはスキップ
+
+    const blockName = label || `${idx}番目の小計ブロック`;
+
+    if (incomplete || pointEntries.length !== 4) {
+      subtotalWarnings.push(
+        `「${blockName}」は4人分のポイント・チップが揃っていないため保存されませんでした。`,
+      );
+      continue;
+    }
+
+    if (Math.abs(sumScores(pointEntries)) > 0.05) {
+      subtotalWarnings.push(`「${blockName}」はポイント合計が0になっていないため保存されませんでした。`);
+      continue;
+    }
+    if (Math.abs(sumScores(chipEntries)) > 0.5) {
+      subtotalWarnings.push(`「${blockName}」はチップ合計が0になっていないため保存されませんでした。`);
+      continue;
+    }
+
+    const seq = nextSeq++;
+    const [session] = await db
+      .insert(gameSessions)
+      .values({
+        dayId,
+        seq,
+        status: "confirmed",
+        displayMode: "raw",
+        playedAt: new Date().toISOString(),
+        memo: label || null,
+      })
+      .returning();
+    if (!session) continue;
+
+    await db.insert(sessionScores).values(
+      pointEntries.map((pe, seatIndex) => ({
+        gameSessionId: session.id,
+        seatIndex,
+        playerId: pe.playerId,
+        rawScore: pe.rawScore,
+        rank: null,
+        rankChip: chipEntries.find((ce) => ce.playerId === pe.playerId)!.rawScore,
+        isHakoware: pe.rawScore <= HAKOWARE_AUTO_THRESHOLD,
+      })),
+    );
+
+    // 保存できたブロックは入力欄をクリアして再表示する
+    subtotalOverrides.delete(`label_${idx}`);
+    for (const playerId of participantIds) {
+      subtotalOverrides.delete(`point_${idx}_${playerId}`);
+      subtotalOverrides.delete(`chip_${idx}_${playerId}`);
+    }
+  }
+
+  // 全行・全ブロックが成功した場合のみリダイレクト（二重送信防止のPost-Redirect-Getパターン）。
+  // 1つでも保存されなかったものがあれば、リダイレクトせずこの場で描画し、
+  // 送信された入力値をそのまま表示して入力し直しやすくする。
+  if (
+    partialSeqs.length === 0 &&
+    tiedSeqs.length === 0 &&
+    badSumSeqs.length === 0 &&
+    subtotalWarnings.length === 0
+  ) {
     return c.redirect(`/days/${dayId}/sheet`);
   }
 
@@ -1383,5 +1576,8 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
     partialSeqs,
     tiedSeqs,
     badSumSeqs,
+    subtotalOverrides,
+    subtotalBlockCount: maxBlockIdx,
+    subtotalWarnings,
   });
 });

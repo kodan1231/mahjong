@@ -12,6 +12,12 @@ export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean; ext
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <meta name="robots" content="noindex" />
       <title>{title} - 麻雀スコア集計</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700;800&display=swap"
+      />
       <style>{css}</style>
       {extraHead}
     </head>
@@ -64,7 +70,7 @@ const css = `
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: "Hiragino Sans", "Yu Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background:
       radial-gradient(circle at 20% 20%, rgba(255,255,255,0.05) 0, transparent 40%),
       radial-gradient(circle at 80% 60%, rgba(255,255,255,0.04) 0, transparent 45%),
@@ -95,20 +101,34 @@ const css = `
     gap: 6px;
   }
   .brand-tile { font-size: 1.3rem; }
-  .app-nav { display: flex; gap: 4px 14px; flex-wrap: wrap; align-items: center; }
-  .app-nav a, .link-button {
-    color: #e8f2ec;
-    text-decoration: none;
-    font-size: 0.88rem;
-    font-weight: 600;
+  .link-button {
     background: none;
     border: none;
-    padding: 4px 2px;
+    padding: 0;
+    color: #0d5c3f;
+    text-decoration: underline;
     cursor: pointer;
-    border-bottom: 2px solid transparent;
+    font-size: inherit;
+    font-weight: 600;
+    font-family: inherit;
   }
-  .app-nav a:hover, .link-button:hover { border-bottom-color: var(--gold); }
-  .inline-form { display: inline; }
+  .link-button:hover { color: var(--gold-dark); }
+  .app-nav { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .app-nav a, .app-nav .link-button {
+    display: inline-block;
+    color: #e8f2ec;
+    text-decoration: none;
+    font-size: 0.82rem;
+    font-weight: 700;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 999px;
+    padding: 7px 13px;
+    cursor: pointer;
+    line-height: 1.1;
+  }
+  .app-nav a:hover, .app-nav .link-button:hover { background: rgba(201, 162, 39, 0.25); border-color: var(--gold); }
+  .inline-form { display: inline-flex; }
   .app-main { max-width: 760px; margin: 0 auto; padding: 18px 16px 48px; }
 
   h1 { font-size: 1.4rem; color: #fdf9ec; margin: 4px 0 14px; letter-spacing: 0.01em; }

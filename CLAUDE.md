@@ -72,7 +72,7 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
 
 ### 対局日のライフサイクル（open/closed）
 
-- `days.status`: `open`（進行中） / `closed`（終了済み）。同時にopenの日は1つまでの運用（`/days/new`・`POST /days`は既にopenな日があれば新規作成をブロックしてその日にリダイレクトする）
+- `days.status`: `open`（進行中） / `closed`（終了済み）。**「今日の日付」で新規作成するときだけ**、同時にopenな日は1つまでを強制する（`POST /days`は日付が今日と一致し、かつ既にopenな日があれば新規作成せずその日にリダイレクトする）。**過去日付での登録（バックフィル）は進行中の対局日の有無に関わらず常に許可**し、作成時点で最初からclosedとして扱う（後から何日分でもさかのぼって登録できる。この判定を誤ると「今季すでに何日か終わっている分をさかのぼって登録したい」という要件を満たせなくなるので注意）
 - 管理者ナビの「対局日を開始」→`/days/new`、「対局日を終了」→`POST /days/close`（現在openな日を探してclosedにし、その日の詳細へリダイレクト。openな日が無ければ`/`へ）。この2つは管理者メニューの先頭に配置（`src/views/layout.tsx`）
 - 「当日」タブ（`GET /`）はopenな日があればその内容を表示し、無ければ「現在進行中の対局日はありません」を表示する
 
@@ -95,6 +95,9 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
 ### デザイン
 
 麻雀感のある「今風」デザインへ刷新済み（`src/views/layout.tsx`のCSS）。背景は緑のフェルト風グラデーション、カードは生成り色のタイル風（角丸＋影）、アクセントカラーは金（`--gold`）。タブバーはピル型、アクティブタブは金背景。CSSカスタムプロパティ（`--felt`, `--tile`, `--gold`, `--plus`, `--minus`等）は`:root`で一括管理。
+
+- **フォント**: Google FontsからNoto Sans JPを読み込み（`<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:...">`）、`font-family`の先頭に指定。端末のシステムフォント任せだと（特にiOS Safariで）意図と異なる書体になることがあったための対応
+- **ナビゲーション**: `.app-nav`内のリンク/ボタンはピル型チップ表示（半透明の背景＋角丸）にしている。カード内の削除リンクなど`.app-nav`外の`.link-button`は下線付きテキストリンクとして別途スタイルしている（`.app-nav .link-button`のセレクタでナビ内だけ上書き）
 
 **Honoの罠**: サブルーターに`.use("*", middleware)`を書いて`app.route("/", subApp)`でマウントすると、そのミドルウェアがアプリ全体（他のサブルーターのパスも含む）にかかってしまう。各ルートに個別で `requireAdmin` を渡す方式にしている（`playerRoutes.get("/players", requireAdmin, handler)`）。新しい管理者専用ルートを追加する際もこの書き方を踏襲すること。
 

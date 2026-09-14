@@ -353,26 +353,19 @@ dayRoutes.get("/days/new", requireAdmin, async (c) => {
   const db = getDb(c.env);
 
   const [openDay] = await db.select().from(days).where(eq(days.status, "open"));
-  if (openDay) {
-    return c.html(
-      <Layout title="対局日を開始" isAdmin={true}>
-        <h1>対局日を開始</h1>
-        <p class="warning">既に進行中の対局日があります（{openDay.date}）。先に終了してから開始してください。</p>
-        <p>
-          <a class="btn" href={`/days/${openDay.id}`}>
-            進行中の対局日を見る
-          </a>
-        </p>
-      </Layout>,
-    );
-  }
-
   const activePlayers = await db.select().from(players).where(eq(players.active, true));
   const today = new Date().toISOString().slice(0, 10);
 
   return c.html(
-    <Layout title="対局日を開始" isAdmin={true}>
-      <h1>対局日を開始</h1>
+    <Layout title="対局日を開始・登録" isAdmin={true}>
+      <h1>対局日を開始・登録</h1>
+      {openDay && (
+        <p class="warning">
+          現在進行中の対局日があります（
+          <a href={`/days/${openDay.id}`}>{openDay.date}</a>
+          ）。<strong>今日の日付</strong>で開始する場合は先に終了してください。過去の日付を追加登録する場合はそのまま下のフォームで登録できます。
+        </p>
+      )}
       <form class="stack" method="post" action="/days">
         <label for="date">日付</label>
         <input type="text" id="date" name="date" value={today} required />
@@ -380,7 +373,7 @@ dayRoutes.get("/days/new", requireAdmin, async (c) => {
         <label for="memo">メモ（任意）</label>
         <input type="text" id="memo" name="memo" />
 
-        <label>今日の参加者</label>
+        <label>参加者</label>
         {activePlayers.map((p) => (
           <label style="font-weight:normal">
             <input type="checkbox" name="playerIds" value={p.id} /> {p.name}
@@ -388,7 +381,7 @@ dayRoutes.get("/days/new", requireAdmin, async (c) => {
         ))}
 
         <button class="btn" type="submit">
-          開始する
+          登録する
         </button>
       </form>
     </Layout>,
@@ -397,9 +390,6 @@ dayRoutes.get("/days/new", requireAdmin, async (c) => {
 
 dayRoutes.post("/days", requireAdmin, async (c) => {
   const db = getDb(c.env);
-
-  const [openDay] = await db.select().from(days).where(eq(days.status, "open"));
-  if (openDay) return c.redirect(`/days/${openDay.id}`);
 
   const body = await c.req.parseBody({ all: true });
   const date = String(body.date ?? "").trim();
@@ -411,7 +401,20 @@ dayRoutes.post("/days", requireAdmin, async (c) => {
     return c.redirect("/days/new");
   }
 
-  const [day] = await db.insert(days).values({ date, memo }).returning({ id: days.id });
+  // 今日の日付で作成する場合のみ「進行中の対局日は1つまで」を強制する。
+  // 過去日の追加登録（バックフィル）は進行中の対局日があっても常に許可し、closed状態で作成する。
+  const today = new Date().toISOString().slice(0, 10);
+  const isToday = date === today;
+
+  if (isToday) {
+    const [openDay] = await db.select().from(days).where(eq(days.status, "open"));
+    if (openDay) return c.redirect(`/days/${openDay.id}`);
+  }
+
+  const [day] = await db
+    .insert(days)
+    .values({ date, memo, status: isToday ? "open" : "closed" })
+    .returning({ id: days.id });
   if (day) {
     await db.insert(dayParticipants).values(playerIds.map((playerId) => ({ dayId: day.id, playerId })));
   }

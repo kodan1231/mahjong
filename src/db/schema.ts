@@ -64,6 +64,20 @@ export const yakumanEvents = sqliteTable("yakuman_events", {
   createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
 });
 
+// 役満発生時にチップを払った対象者のスナップショット。
+// day_participantsを後から編集しても過去の役満チップ集計が変わらないよう、登録時点の対象者を固定して保存する。
+export const yakumanEventTargets = sqliteTable(
+  "yakuman_event_targets",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    yakumanEventId: integer("yakuman_event_id").notNull().references(() => yakumanEvents.id),
+    playerId: integer("player_id").notNull().references(() => players.id),
+  },
+  (t) => ({
+    uniq: uniqueIndex("yakuman_event_targets_unique").on(t.yakumanEventId, t.playerId),
+  }),
+);
+
 export const handLogs = sqliteTable("hand_logs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   gameSessionId: integer("game_session_id").notNull().references(() => gameSessions.id),

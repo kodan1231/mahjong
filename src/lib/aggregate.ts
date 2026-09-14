@@ -1,6 +1,14 @@
-import { eq, and, gte, lt } from "drizzle-orm";
+import { eq, and, gte, lt, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { players, days, dayParticipants, gameSessions, sessionScores, yakumanEvents } from "../db/schema";
+import {
+  players,
+  days,
+  dayParticipants,
+  gameSessions,
+  sessionScores,
+  yakumanEvents,
+  yakumanEventTargets,
+} from "../db/schema";
 import { ORIGIN_SCORE, computeYakumanChips } from "./scoring";
 
 export interface PlayerTotal {
@@ -25,17 +33,24 @@ async function yakumanChipsForDays(db: Db, dayIds: number[]): Promise<Map<number
   const relevant = events.filter((e) => dayIds.includes(e.dayId));
   if (relevant.length === 0) return totals;
 
-  const participantsByDay = new Map<number, number[]>();
-  for (const dayId of new Set(relevant.map((e) => e.dayId))) {
-    const rows = await db
-      .select({ playerId: dayParticipants.playerId })
-      .from(dayParticipants)
-      .where(eq(dayParticipants.dayId, dayId));
-    participantsByDay.set(dayId, rows.map((r) => r.playerId));
+  // 登録時点のスナップショット（yakuman_event_targets）から対象者を取得する。
+  // day_participantsを後から編集しても、過去に確定した役満のチップ集計は変わらない。
+  const eventIds = relevant.map((e) => e.id);
+  const targetRows = await db
+    .select({ yakumanEventId: yakumanEventTargets.yakumanEventId, playerId: yakumanEventTargets.playerId })
+    .from(yakumanEventTargets)
+    .where(inArray(yakumanEventTargets.yakumanEventId, eventIds));
+
+  const targetsByEvent = new Map<number, number[]>();
+  for (const row of targetRows) {
+    const list = targetsByEvent.get(row.yakumanEventId) ?? [];
+    list.push(row.playerId);
+    targetsByEvent.set(row.yakumanEventId, list);
   }
 
   for (const event of relevant) {
-    const participantIds = participantsByDay.get(event.dayId) ?? [];
+    const targetIds = targetsByEvent.get(event.id) ?? [];
+    const participantIds = [...targetIds, event.winnerPlayerId];
     const chips = computeYakumanChips(participantIds, event.winnerPlayerId, event.chipPerLoser);
     for (const { playerId, chip } of chips) {
       totals.set(playerId, (totals.get(playerId) ?? 0) + chip);

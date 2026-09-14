@@ -9,6 +9,7 @@ import {
   gameSessions,
   sessionScores,
   yakumanEvents,
+  yakumanEventTargets,
   handLogs,
   photoUploads,
 } from "../db/schema";
@@ -211,6 +212,15 @@ dayRoutes.get("/days/:id", async (c) => {
     .innerJoin(players, eq(yakumanEvents.winnerPlayerId, players.id))
     .where(eq(yakumanEvents.dayId, dayId));
 
+  const eventIds = events.map((e) => e.id);
+  const allTargets = eventIds.length
+    ? await db
+        .select({ yakumanEventId: yakumanEventTargets.yakumanEventId, name: players.name })
+        .from(yakumanEventTargets)
+        .innerJoin(players, eq(yakumanEventTargets.playerId, players.id))
+        .where(inArray(yakumanEventTargets.yakumanEventId, eventIds))
+    : [];
+
   const daySummary = await computeDaySummary(db, dayId);
 
   return c.html(
@@ -369,18 +379,22 @@ dayRoutes.get("/days/:id", async (c) => {
       <h2>役満</h2>
       {events.length === 0 && <p>まだ役満はありません。</p>}
       <ul>
-        {events.map((e) => (
-          <li>
-            {e.winnerName} - {e.yakuName}（他全員 -{e.chipPerLoser}）
-            {admin && (
-              <form class="inline-form" method="post" action={`/days/${dayId}/yakuman/${e.id}/delete`}>
-                <button class="link-button" type="submit">
-                  [削除]
-                </button>
-              </form>
-            )}
-          </li>
-        ))}
+        {events.map((e) => {
+          const targetNames = allTargets.filter((t) => t.yakumanEventId === e.id).map((t) => t.name);
+          return (
+            <li>
+              {e.winnerName} - {e.yakuName}
+              {targetNames.length > 0 ? `（${targetNames.join("、")}から各-${e.chipPerLoser}）` : ""}
+              {admin && (
+                <form class="inline-form" method="post" action={`/days/${dayId}/yakuman/${e.id}/delete`}>
+                  <button class="link-button" type="submit">
+                    [削除]
+                  </button>
+                </form>
+              )}
+            </li>
+          );
+        })}
       </ul>
       {admin && (
         <details>
@@ -394,6 +408,12 @@ dayRoutes.get("/days/:id", async (c) => {
             </select>
             <label>役名</label>
             <input type="text" name="yakuName" required />
+            <label>チップを払う人（和了者本人は自動的に除外されます）</label>
+            {participants.map((p) => (
+              <label style="font-weight:normal">
+                <input type="checkbox" name="targetPlayerIds" value={p.playerId} checked /> {p.name}
+              </label>
+            ))}
             <button class="btn" type="submit">
               登録
             </button>
@@ -701,13 +721,24 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
 dayRoutes.post("/days/:id/yakuman", requireAdmin, async (c) => {
   const dayId = Number(c.req.param("id"));
   const db = getDb(c.env);
-  const body = await c.req.parseBody();
+  const body = await c.req.parseBody({ all: true });
 
   const winnerPlayerId = Number(body.winnerPlayerId);
   const yakuName = String(body.yakuName ?? "").trim();
+  const targetIdsRaw = body.targetPlayerIds;
+  const targetIds = (Array.isArray(targetIdsRaw) ? targetIdsRaw : targetIdsRaw ? [targetIdsRaw] : [])
+    .map(Number)
+    .filter((id) => id !== winnerPlayerId);
 
   if (winnerPlayerId && yakuName) {
-    await db.insert(yakumanEvents).values({ dayId, winnerPlayerId, yakuName });
+    const [event] = await db
+      .insert(yakumanEvents)
+      .values({ dayId, winnerPlayerId, yakuName })
+      .returning({ id: yakumanEvents.id });
+
+    if (event && targetIds.length > 0) {
+      await db.insert(yakumanEventTargets).values(targetIds.map((playerId) => ({ yakumanEventId: event.id, playerId })));
+    }
   }
 
   return c.redirect(`/days/${dayId}`);
@@ -754,6 +785,7 @@ dayRoutes.post("/days/:id/yakuman/:yid/delete", requireAdmin, async (c) => {
   const yakumanId = Number(c.req.param("yid"));
   const db = getDb(c.env);
 
+  await db.delete(yakumanEventTargets).where(eq(yakumanEventTargets.yakumanEventId, yakumanId));
   await db.delete(yakumanEvents).where(eq(yakumanEvents.id, yakumanId));
 
   return c.redirect(`/days/${dayId}`);

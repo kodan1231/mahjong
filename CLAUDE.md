@@ -41,11 +41,13 @@ Cloudflare Workers + D1 + R2 + Workers AI (Hono) で構築。詳細なセット�
 
 - `players`: id, name, active
 - `days`: id, date, memo
-- `day_participants`: dayId, playerId（その日の参加者。役満ボーナスの対象範囲）
+- `day_participants`: dayId, playerId（その日の参加者。役満登録フォームの選択肢に使う）
 - `game_sessions`: id, dayId, seq, status(`pending`/`confirmed`), displayMode(`raw`/`diff`), playedAt
 - `session_scores`: gameSessionId, seatIndex(0-3), playerId, rawScore, isHakoware, rank, rankChip
   - 半荘開始前に座席順で4行作成 → 撮影後OCR値を素点正規化してrawScoreを埋める → 確定時にrank/rankChipを計算
 - `yakuman_events`: id, dayId, gameSessionId(nullable), winnerPlayerId, yakuName, chipPerLoser(default 5)
+- `yakuman_event_targets`: id, yakumanEventId, playerId
+  - 役満登録時にチップを払う対象者をチェックボックスで選び、その時点のIDリストをスナップショットとして保存する。`day_participants`を後から編集しても、既に登録済みの役満チップ集計は変わらない（`src/lib/aggregate.ts`の`yakumanChipsForDays`はこのテーブルを参照する）
 - `hand_logs`: id, gameSessionId, seq, roundLabel, winType(`ron`/`tsumo`/`draw`), winnerPlayerId, loserPlayerId, yakuText
 - `photo_uploads`: id, gameSessionId, r2Key, ocrRawJson
 - `settings`: key/value（現状未使用、将来の設定用に予約）
@@ -71,7 +73,7 @@ Cloudflare Workers + D1 + R2 + Workers AI (Hono) で構築。詳細なセット�
 
 ## 既知の運用上の懸念
 
-- **役満チップが遡及的に変わりうる**: `computeYakumanChips`はイベント発生時点ではなく、集計時点の`day_participants`を都度参照して計算する。`/days/:id/edit`で後から参加者を編集すると、過去の役満チップの集計結果も変わる（イベント側にスナップショットを保存していないため）。直す場合は`yakuman_events`にその時点の対象プレイヤーIDリストを保存する設計変更が必要
+- **チップはあくまで付録**: 年間順位を決めるのは素点合計であり、チップ(着順チップ・役満チップ)は補足情報という位置づけ。誰がいつ役満を出したかが分かればよく、厳密さより見やすさ・分かりやすさを優先する
 - **OCR精度は実機未検証**: 実際の点数表示機の写真でのテストがまだできていない。当面は「OCR結果を確認して手直しする」運用が前提
 - **共有パスワードにレート制限なし**: 閲覧は認証不要でURLが広まりやすい設計のため、ログインへの総当たりを防ぐ仕組みは未実装
 - **ダッシュボードの「今年」判定はサーバー(UTC)時刻基準**: 日本時間の大晦日〜元日をまたぐ対局で、トップページの年別集計の初期表示がずれる可能性がある（`/stats/:year`で明示的に年を指定すれば正しく見られる）

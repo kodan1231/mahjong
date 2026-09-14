@@ -7,14 +7,16 @@ export type DisplayMode = "raw" | "diff";
 
 /**
  * 点数表示機のOCR値を素点に正規化する。
- * diffモード（配給原点からの±差分表示）の場合は origin を加算する。
+ * diffモード（配給原点からの±差分表示）の場合、表示されている数値は1000点単位
+ * （麻雀の慣習で「25000点」を「25」と表すのと同じ）なので、1000倍してから
+ * originに加算する。例: 表示が"+18"なら 25000 + 18*1000 = 43000。
  */
 export function normalizeRawScore(
   ocrValue: number,
   displayMode: DisplayMode,
   origin: number = ORIGIN_SCORE,
 ): number {
-  return displayMode === "diff" ? origin + ocrValue : ocrValue;
+  return displayMode === "diff" ? origin + ocrValue * 1000 : ocrValue;
 }
 
 export interface PlayerScore {

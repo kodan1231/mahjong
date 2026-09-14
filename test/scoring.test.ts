@@ -10,13 +10,13 @@ describe("normalizeRawScore", () => {
     expect(normalizeRawScore(32000, "raw")).toBe(32000);
   });
 
-  it("adds the origin score in diff mode", () => {
-    expect(normalizeRawScore(7000, "diff")).toBe(32000);
-    expect(normalizeRawScore(-3500, "diff")).toBe(21500);
+  it("treats the diff-mode display value as 1000-point units before adding the origin", () => {
+    expect(normalizeRawScore(7, "diff")).toBe(32000);
+    expect(normalizeRawScore(-3.5, "diff")).toBe(21500);
   });
 
   it("supports a custom origin", () => {
-    expect(normalizeRawScore(5000, "diff", 30000)).toBe(35000);
+    expect(normalizeRawScore(5, "diff", 30000)).toBe(35000);
   });
 });
 

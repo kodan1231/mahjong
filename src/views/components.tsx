@@ -6,6 +6,7 @@ export const Signed = ({ n, unit = "" }: { n: number; unit?: string }) => (
   </span>
 );
 
+// チップ合計はあくまで付録情報のため一覧には出さず、個別成績ページ（/players/:id）でのみ表示する。
 export const TotalsTable = ({
   totals,
 }: {
@@ -16,7 +17,6 @@ export const TotalsTable = ({
       <tr>
         <th>プレイヤー</th>
         <th>素点合計</th>
-        <th>チップ合計</th>
       </tr>
     </thead>
     <tbody>
@@ -27,9 +27,6 @@ export const TotalsTable = ({
           </td>
           <td>
             <Signed n={t.rawTotal} />
-          </td>
-          <td>
-            <Signed n={t.chipTotal} />
           </td>
         </tr>
       ))}

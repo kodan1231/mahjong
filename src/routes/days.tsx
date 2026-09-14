@@ -368,7 +368,7 @@ dayRoutes.get("/days/new", requireAdmin, async (c) => {
       )}
       <form class="stack" method="post" action="/days">
         <label for="date">日付</label>
-        <input type="text" id="date" name="date" value={today} required />
+        <input type="date" id="date" name="date" value={today} required />
 
         <label for="memo">メモ（任意）</label>
         <input type="text" id="memo" name="memo" />
@@ -497,11 +497,14 @@ dayRoutes.get("/days/:id/sessions/new", requireAdmin, async (c) => {
         {[0, 1, 2, 3].map((seat) => (
           <div class="seat-row">
             <span class="seat-label">座席{seat + 1}</span>
-            <select name={`seat${seat}`} required>
+            <div class="choice-group">
               {participants.map((p) => (
-                <option value={p.playerId}>{p.name}</option>
+                <label class="choice-btn">
+                  <input type="radio" name={`seat${seat}`} value={p.playerId} required />
+                  {p.name}
+                </label>
               ))}
-            </select>
+            </div>
           </div>
         ))}
 
@@ -695,19 +698,29 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
           const prefill =
             r.rawScore ?? (ocrRaw != null ? normalizeRawScore(ocrRaw, displayMode) : "");
           return (
-            <div class="seat-row">
-              <span class="seat-label">座席{r.seatIndex + 1}</span>
-              <select name={`player_${r.seatIndex}`}>
-                {dayParticipantOptions.map((p) => (
-                  <option value={p.playerId} selected={p.playerId === r.playerId}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <input type="number" name={`score_${r.seatIndex}`} value={String(prefill)} required />
-              <label style="font-weight:normal">
-                <input type="checkbox" name={`hakoware_${r.seatIndex}`} checked={r.isHakoware} /> 箱割れ
-              </label>
+            <div class="seat-block">
+              <div class="seat-row">
+                <span class="seat-label">座席{r.seatIndex + 1}</span>
+                <div class="choice-group">
+                  {dayParticipantOptions.map((p) => (
+                    <label class="choice-btn">
+                      <input
+                        type="radio"
+                        name={`player_${r.seatIndex}`}
+                        value={p.playerId}
+                        checked={p.playerId === r.playerId}
+                      />
+                      {p.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div class="seat-row">
+                <input type="number" name={`score_${r.seatIndex}`} value={String(prefill)} required />
+                <label style="font-weight:normal">
+                  <input type="checkbox" name={`hakoware_${r.seatIndex}`} checked={r.isHakoware} /> 箱割れ
+                </label>
+              </div>
             </div>
           );
         })}
@@ -885,7 +898,7 @@ dayRoutes.get("/days/:id/edit", requireAdmin, async (c) => {
       <h1>対局日を編集</h1>
       <form class="stack" method="post" action={`/days/${dayId}/edit`}>
         <label for="date">日付</label>
-        <input type="text" id="date" name="date" value={day.date} required />
+        <input type="date" id="date" name="date" value={day.date} required />
 
         <label for="memo">メモ（任意）</label>
         <input type="text" id="memo" name="memo" value={day.memo ?? ""} />

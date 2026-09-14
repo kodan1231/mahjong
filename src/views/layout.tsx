@@ -68,6 +68,7 @@ const css = `
     --minus: #c0392b;
   }
   * { box-sizing: border-box; }
+  html { font-size: 18px; }
   body {
     margin: 0;
     font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -78,6 +79,7 @@ const css = `
     background-attachment: fixed;
     color: var(--ink);
     min-height: 100vh;
+    line-height: 1.5;
   }
   .app-header {
     display: flex;
@@ -104,6 +106,7 @@ const css = `
   .link-button {
     background: none;
     border: none;
+    margin: 0;
     padding: 0;
     color: #0d5c3f;
     text-decoration: underline;
@@ -113,27 +116,32 @@ const css = `
     font-family: inherit;
   }
   .link-button:hover { color: var(--gold-dark); }
-  .app-nav { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .app-nav { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; }
   .app-nav a, .app-nav .link-button {
-    display: inline-block;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
     color: #e8f2ec;
     text-decoration: none;
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     font-weight: 700;
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.14);
     border-radius: 999px;
     padding: 7px 13px;
+    margin: 0;
     cursor: pointer;
-    line-height: 1.1;
+    line-height: 1.3;
+    vertical-align: middle;
   }
   .app-nav a:hover, .app-nav .link-button:hover { background: rgba(201, 162, 39, 0.25); border-color: var(--gold); }
+  .app-nav .inline-form { display: inline-flex; align-items: stretch; margin: 0; }
   .inline-form { display: inline-flex; }
-  .app-main { max-width: 760px; margin: 0 auto; padding: 18px 16px 48px; }
+  .app-main { max-width: 760px; margin: 0 auto; padding: 14px 14px 40px; }
 
-  h1 { font-size: 1.4rem; color: #fdf9ec; margin: 4px 0 14px; letter-spacing: 0.01em; }
-  h2 { font-size: 1.05rem; margin-top: 1.6em; color: var(--ink); }
-  h3 { font-size: 1rem; }
+  h1 { font-size: 1.35rem; color: #fdf9ec; margin: 4px 0 12px; letter-spacing: 0.01em; }
+  h2 { font-size: 1.08rem; margin-top: 1.1em; color: var(--ink); }
+  h3 { font-size: 1.02rem; }
 
   .tab-bar {
     display: flex;
@@ -156,17 +164,17 @@ const css = `
   }
   .tab.active { background: var(--gold); color: #2a2306; }
 
-  table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-  th, td { padding: 9px 6px; border-bottom: 1px solid var(--tile-edge); text-align: right; font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  th, td { padding: 7px 5px; border-bottom: 1px solid var(--tile-edge); text-align: right; font-variant-numeric: tabular-nums; }
   th:first-child, td:first-child { text-align: left; }
-  th { color: var(--ink-soft); font-weight: 600; font-size: 0.85rem; }
+  th { color: var(--ink-soft); font-weight: 600; font-size: 0.82rem; }
 
   .card {
     background: var(--tile);
     border: 1px solid var(--tile-edge);
     border-radius: 14px;
-    padding: 18px;
-    margin-bottom: 16px;
+    padding: 14px;
+    margin-bottom: 14px;
     box-shadow: 0 6px 18px rgba(0,0,0,0.18);
   }
   .card h2:first-child, .card h3:first-child { margin-top: 0; }
@@ -196,10 +204,47 @@ const css = `
   }
   input:focus, select:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
 
+  .seat-block { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px dashed var(--tile-edge); }
   .seat-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
   .seat-row .seat-label { width: 4em; font-weight: 700; color: var(--ink-soft); flex-shrink: 0; }
   .seat-row select { flex: 1 1 8em; }
   .seat-row input[type=number] { flex: 1 1 6em; }
+
+  /* ボタン風の選択肢（座席登録・確認画面のプレイヤー選択）。1行に収まるよう横スクロールにする。 */
+  .choice-group {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 3px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .choice-btn {
+    position: relative;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    padding: 9px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--tile-edge);
+    background: white;
+    color: var(--ink);
+    font-weight: 700;
+    font-size: 0.92rem;
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .choice-btn input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+  .choice-btn:has(input:checked) { background: var(--gold); border-color: var(--gold-dark); color: #2a2306; }
 
   .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; background: #e5e7df; color: var(--ink-soft); }
   .badge-pending { background: #fdeecb; color: #92600e; }

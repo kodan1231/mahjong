@@ -221,54 +221,88 @@ export async function computePlayerYakumanWins(db: Db, playerId: number): Promis
     .orderBy(desc(days.date));
 }
 
-export interface DailyCandle {
+export interface PlayerDaySummary {
+  dayId: number;
   date: string;
-  /** その日の最初の半荘が始まる前の累計ポイント（前日までの終値） */
-  open: number;
-  /** その日の中で累計ポイントが到達した最高値 */
-  high: number;
-  /** その日の中で累計ポイントが到達した最安値 */
-  low: number;
-  /** その日の最後の半荘を終えた時点の累計ポイント */
-  close: number;
+  memo: string | null;
+  rawTotal: number;
+  chipTotal: number;
 }
 
 /**
- * 確定済み半荘を古い順に並べ、累計ポイントの推移を「登録日単位」の四本値（始値/高値/安値/終値）に
- * 集約して返す。ローソク足チャート用。折れ線グラフだと半荘単位の細かい上下が分かりにくいという
- * フィードバックを受け、日単位でその日の増減方向（陽線/陰線）と振れ幅（高値-安値）を見せる方式に変更した。
+ * そのプレイヤーが参加した対局日ごとの、その日1日分のポイント合計・チップ合計（役満チップ込み）。
+ * 個人ページの日別集計テーブル・棒グラフ用。confirmed（確定済み）の半荘があった日のみを対象にする
+ * （pending/tiedのまま未確定の半荘しかない日は除外する）。日付昇順（古い順）で返す。
  */
-export async function computePlayerDailyCandles(db: Db, playerId: number): Promise<DailyCandle[]> {
-  const rows = await db
-    .select({
-      date: days.date,
-      seq: gameSessions.seq,
-      rawScore: sessionScores.rawScore,
-    })
+export async function computePlayerDailyBreakdown(
+  db: Db,
+  playerId: number,
+  range: DateRange = {},
+): Promise<PlayerDaySummary[]> {
+  const dayConditions = [eq(dayParticipants.playerId, playerId)];
+  if (range.from) dayConditions.push(gte(days.date, range.from));
+  if (range.to) dayConditions.push(lt(days.date, range.to));
+
+  const dayRows = await db
+    .select({ id: days.id, date: days.date, memo: days.memo })
+    .from(dayParticipants)
+    .innerJoin(days, eq(dayParticipants.dayId, days.id))
+    .where(and(...dayConditions));
+
+  const dayIds = dayRows.map((d) => d.id);
+  if (dayIds.length === 0) return [];
+
+  const scoreRows = await db
+    .select({ dayId: gameSessions.dayId, rawScore: sessionScores.rawScore, rankChip: sessionScores.rankChip })
     .from(sessionScores)
     .innerJoin(gameSessions, eq(sessionScores.gameSessionId, gameSessions.id))
-    .innerJoin(days, eq(gameSessions.dayId, days.id))
-    .where(and(eq(sessionScores.playerId, playerId), eq(gameSessions.status, "confirmed")));
+    .where(
+      and(
+        eq(sessionScores.playerId, playerId),
+        eq(gameSessions.status, "confirmed"),
+        inArray(gameSessions.dayId, dayIds),
+      ),
+    );
 
-  const sorted = rows
-    .filter((r): r is typeof r & { rawScore: number } => r.rawScore != null)
-    .sort((a, b) => (a.date === b.date ? a.seq - b.seq : a.date.localeCompare(b.date)));
-
-  const candles: DailyCandle[] = [];
-  let cumulative = 0;
-  let current: DailyCandle | null = null;
-
-  for (const r of sorted) {
-    if (!current || current.date !== r.date) {
-      if (current) candles.push(current);
-      current = { date: r.date, open: cumulative, high: cumulative, low: cumulative, close: cumulative };
-    }
-    cumulative += r.rawScore;
-    current.high = Math.max(current.high, cumulative);
-    current.low = Math.min(current.low, cumulative);
-    current.close = cumulative;
+  const rawByDay = new Map<number, number>();
+  const chipByDay = new Map<number, number>();
+  for (const r of scoreRows) {
+    if (r.rawScore != null) rawByDay.set(r.dayId, (rawByDay.get(r.dayId) ?? 0) + r.rawScore);
+    if (r.rankChip != null) chipByDay.set(r.dayId, (chipByDay.get(r.dayId) ?? 0) + r.rankChip);
   }
-  if (current) candles.push(current);
 
-  return candles;
+  // 役満チップはその日の中の1イベントとして発生するため、日別集計では該当する日にだけ加算する
+  // （yakumanChipsForDaysは複数日をまたいだ合計しか返さないため、ここでは日ごとに個別計算する）。
+  const events = await db.select().from(yakumanEvents).where(inArray(yakumanEvents.dayId, dayIds));
+  const eventIds = events.map((e) => e.id);
+  const targetRows = eventIds.length
+    ? await db
+        .select({ yakumanEventId: yakumanEventTargets.yakumanEventId, playerId: yakumanEventTargets.playerId })
+        .from(yakumanEventTargets)
+        .where(inArray(yakumanEventTargets.yakumanEventId, eventIds))
+    : [];
+  const targetsByEvent = new Map<number, number[]>();
+  for (const row of targetRows) {
+    const list = targetsByEvent.get(row.yakumanEventId) ?? [];
+    list.push(row.playerId);
+    targetsByEvent.set(row.yakumanEventId, list);
+  }
+  for (const event of events) {
+    const targetIds = targetsByEvent.get(event.id) ?? [];
+    const participantIds = [...targetIds, event.winnerPlayerId];
+    const chips = computeYakumanChips(participantIds, event.winnerPlayerId, event.chipPerLoser);
+    const mine = chips.find((c) => c.playerId === playerId);
+    if (mine) chipByDay.set(event.dayId, (chipByDay.get(event.dayId) ?? 0) + mine.chip);
+  }
+
+  return dayRows
+    .filter((d) => rawByDay.has(d.id))
+    .map((d) => ({
+      dayId: d.id,
+      date: d.date,
+      memo: d.memo,
+      rawTotal: rawByDay.get(d.id) ?? 0,
+      chipTotal: chipByDay.get(d.id) ?? 0,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }

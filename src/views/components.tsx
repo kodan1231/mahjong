@@ -73,22 +73,14 @@ export const TabBar = ({ active, year }: { active: TabKey; year?: number }) => {
   );
 };
 
-export interface DailyCandle {
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-}
-
 /**
- * 登録日単位の累計ポイント推移を表すローソク足チャート（追加ライブラリ不要、サーバー側でSVGを生成する）。
- * 1本＝1対局日。始値=その日の最初の半荘が始まる前の累計、終値=その日の最後の半荘を終えた時点の累計、
- * ひげ（高値・安値）=その日の中で累計が到達した最高値・最安値。終値が始値以上なら陽線（プラス色）、
- * 未満なら陰線（マイナス色）にする。折れ線グラフだと半荘単位の細かい上下が分かりにくいというフィードバックで導入。
+ * 対局日単位のポイント合計を表す0起点の棒グラフ（追加ライブラリ不要、サーバー側でSVGを生成する）。
+ * 1本＝1対局日のその日のポイント合計。プラスなら基準線から上に緑、マイナスなら下に赤の棒を伸ばす。
+ * 当初はローソク足（始値/終値/高値/安値）で実装していたが、見せたいのは「その日の増減」であって
+ * 累計の推移ではないという指摘を受け、よりシンプルな0起点の棒グラフに置き換えた（2026-09-16）。
  */
-export const Candlestick = ({ candles }: { candles: DailyCandle[] }) => {
-  if (candles.length === 0) return <p>グラフを表示するにはデータが足りません。</p>;
+export const DailyBarChart = ({ points }: { points: { date: string; value: number }[] }) => {
+  if (points.length === 0) return <p>この年のデータがありません。</p>;
 
   const width = 600;
   const height = 160;
@@ -96,16 +88,13 @@ export const Candlestick = ({ candles }: { candles: DailyCandle[] }) => {
   const padBottom = 10;
   const padSide = 12;
 
-  const values = candles.flatMap((c) => [c.open, c.high, c.low, c.close, 0]);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const plotHeight = height - padTop - padBottom;
-  const yFor = (v: number) => padTop + plotHeight * (1 - (v - min) / range);
+  const maxAbs = Math.max(...points.map((p) => Math.abs(p.value)), 1);
+  const plotHalf = (height - padTop - padBottom) / 2;
+  const zeroY = padTop + plotHalf;
+  const scale = plotHalf / maxAbs;
 
-  const slotWidth = (width - padSide * 2) / candles.length;
-  const bodyWidth = Math.max(2, Math.min(slotWidth * 0.6, 18));
-  const zeroY = yFor(0);
+  const slotWidth = (width - padSide * 2) / points.length;
+  const barWidth = Math.max(2, Math.min(slotWidth * 0.6, 20));
 
   return (
     <svg
@@ -114,23 +103,14 @@ export const Candlestick = ({ candles }: { candles: DailyCandle[] }) => {
       viewBox={`0 0 ${width} ${height}`}
       style="max-width:100%; height:auto; display:block"
     >
-      <line x1={0} y1={zeroY} x2={width} y2={zeroY} stroke="#ccc" stroke-dasharray="4,4" />
-      {candles.map((c, i) => {
+      <line x1={0} y1={zeroY} x2={width} y2={zeroY} stroke="#999" />
+      {points.map((p, i) => {
         const cx = padSide + slotWidth * i + slotWidth / 2;
-        const isUp = c.close >= c.open;
+        const barHeight = Math.max(Math.abs(p.value) * scale, p.value === 0 ? 0 : 1.5);
+        const isUp = p.value >= 0;
         const color = isUp ? "#2f9e58" : "#c0392b";
-        const yHigh = yFor(c.high);
-        const yLow = yFor(c.low);
-        const yOpen = yFor(c.open);
-        const yClose = yFor(c.close);
-        const bodyTop = Math.min(yOpen, yClose);
-        const bodyHeight = Math.max(Math.abs(yClose - yOpen), 1.5);
-        return (
-          <g>
-            <line x1={cx} y1={yHigh} x2={cx} y2={yLow} stroke={color} stroke-width="1.5" />
-            <rect x={cx - bodyWidth / 2} y={bodyTop} width={bodyWidth} height={bodyHeight} fill={color} />
-          </g>
-        );
+        const y = isUp ? zeroY - barHeight : zeroY;
+        return <rect x={cx - barWidth / 2} y={y} width={barWidth} height={barHeight} fill={color} />;
       })}
     </svg>
   );

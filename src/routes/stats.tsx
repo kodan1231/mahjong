@@ -4,7 +4,7 @@ import type { Env } from "../types";
 import { getDb } from "../db/client";
 import { players, days } from "../db/schema";
 import { Layout } from "../views/layout";
-import { Signed, Candlestick, TotalsTable, TabBar } from "../views/components";
+import { Signed, DailyBarChart, TotalsTable, TabBar } from "../views/components";
 import { isAdmin } from "../lib/auth";
 import {
   computeTotals,
@@ -12,7 +12,7 @@ import {
   computePlayerYearlyBreakdown,
   computeRankDistribution,
   computePlayerYakumanWins,
-  computePlayerDailyCandles,
+  computePlayerDailyBreakdown,
 } from "../lib/aggregate";
 
 export const statsRoutes = new Hono<{ Bindings: Env }>();
@@ -92,15 +92,21 @@ statsRoutes.get("/players/:id", async (c) => {
   const [player] = await db.select().from(players).where(eq(players.id, playerId));
   if (!player) return c.notFound();
 
-  const [overall, yearly, rankDist, yakumanWins, candles] = await Promise.all([
+  const [overall, yearly, rankDist, yakumanWins] = await Promise.all([
     computeTotals(db),
     computePlayerYearlyBreakdown(db, playerId),
     computeRankDistribution(db, playerId),
     computePlayerYakumanWins(db, playerId),
-    computePlayerDailyCandles(db, playerId),
   ]);
   const mine = overall.find((t) => t.playerId === playerId);
   const gameCount = rankDist.reduce((sum, r) => sum + r.count, 0);
+
+  // 日別集計は年で絞り込む（?yearクエリ省略時はこのプレイヤーの最新の対局年、それも無ければ今年）。
+  const yearQuery = c.req.query("year");
+  const selectedYear = yearQuery
+    ? Number(yearQuery)
+    : (yearly[yearly.length - 1]?.year ?? new Date().getFullYear());
+  const dailyBreakdown = await computePlayerDailyBreakdown(db, playerId, yearRange(selectedYear));
 
   return c.html(
     <Layout title={`${player.name} の成績`} isAdmin={admin}>
@@ -112,14 +118,48 @@ statsRoutes.get("/players/:id", async (c) => {
           ポイント合計: <Signed n={mine?.rawTotal ?? 0} /> ／ チップ合計: <Signed n={mine?.chipTotal ?? 0} /> ／ 半荘数:{" "}
           {gameCount}
         </p>
-        {candles.length > 0 && (
-          <p style="font-size:0.8rem; color:var(--ink-soft); margin:6px 0 2px">
-            通算ポイントの推移（{candles[0]!.date}〜{candles[candles.length - 1]!.date}
-            、1本＝1対局日）。上下のひげがその日の最高値・最安値、太い部分が始値（前日までの累計）と終値（その日の累計）。
-            緑＝その日プラスで終えた（陽線）、赤＝マイナスで終えた（陰線）
-          </p>
+      </div>
+
+      <div class="card">
+        <h2>日別</h2>
+        <p>
+          <a href={`/players/${playerId}?year=${selectedYear - 1}`}>← {selectedYear - 1}年</a> ／ {selectedYear}年 ／{" "}
+          <a href={`/players/${playerId}?year=${selectedYear + 1}`}>{selectedYear + 1}年 →</a>
+        </p>
+        <p style="font-size:0.8rem; color:var(--ink-soft); margin:6px 0 2px">
+          対局日ごとのポイント合計を0を基準にした棒グラフで表示（プラスの日は緑で上、マイナスの日は赤で下）
+        </p>
+        <DailyBarChart points={dailyBreakdown.map((d) => ({ date: d.date, value: d.rawTotal }))} />
+        {dailyBreakdown.length === 0 && <p>{selectedYear}年の対局記録はまだありません。</p>}
+        {dailyBreakdown.length > 0 && (
+          <table class="session-table">
+            <thead>
+              <tr>
+                <th>対局日</th>
+                <th>ポイント</th>
+                <th>チップ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...dailyBreakdown].reverse().map((d) => (
+                <tr>
+                  <td>
+                    <a href={`/days/${d.dayId}`}>
+                      {d.date}
+                      {d.memo ? `(${d.memo})` : ""}
+                    </a>
+                  </td>
+                  <td>
+                    <Signed n={d.rawTotal} />
+                  </td>
+                  <td>
+                    <Signed n={d.chipTotal} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
-        <Candlestick candles={candles} />
       </div>
 
       <div class="card">

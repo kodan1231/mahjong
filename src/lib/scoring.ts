@@ -89,6 +89,54 @@ export function computeRankAndChips(scores: PlayerScore[]): RankAndChipsResult {
   return { ranked, hasTie };
 }
 
+export interface LiveHandEntry {
+  winType: string;
+  /** 和了者の座席(0-3)。ロン・ツモ以外はnull */
+  winnerSeat: number | null;
+  /** ロン時の対象（放銃者）の座席。ロン以外はnull */
+  loserSeat: number | null;
+  /** その局の親の座席(0-3)。ツモの配分計算に使う。ronでは無視される */
+  dealerSeat: number | null;
+  /** その局の点数（ロンは授受額そのまま、ツモは和了者が受け取る合計） */
+  points: number | null;
+}
+
+/**
+ * 対局中ページの「現在のスコア」（この半荘の中だけの暫定合計）を、ここまでの局メモから算出する。
+ * 正式なスコアは撮影・確認画面で別途確定するため、これはあくまで対局中の目安表示。
+ * - ロン: 和了者+points、対象(放銃者)-pointsのシンプルな授受
+ * - ツモ: pointsには和了者が受け取る合計を入力してもらう前提で、親かどうかに応じた比率
+ *   （親のツモは3人が均等払い、子のツモは親が半分・残り2人が1/4ずつ）で各家の支払い額を求める
+ * - 流局・チョンボ: このスコアには反映しない（正式なノーテン罰符等は確認画面側で扱う）
+ */
+export function computeLiveScores(hands: LiveHandEntry[]): number[] {
+  const scores = [0, 0, 0, 0];
+
+  for (const h of hands) {
+    if (h.points == null) continue;
+
+    if (h.winType === "ron" && h.winnerSeat != null && h.loserSeat != null) {
+      scores[h.winnerSeat]! += h.points;
+      scores[h.loserSeat]! -= h.points;
+    } else if (h.winType === "tsumo" && h.winnerSeat != null) {
+      const dealerSeat = h.dealerSeat ?? 0;
+      scores[h.winnerSeat]! += h.points;
+      for (let seat = 0; seat < 4; seat++) {
+        if (seat === h.winnerSeat) continue;
+        if (h.winnerSeat === dealerSeat) {
+          scores[seat]! -= h.points / 3;
+        } else if (seat === dealerSeat) {
+          scores[seat]! -= h.points / 2;
+        } else {
+          scores[seat]! -= h.points / 4;
+        }
+      }
+    }
+  }
+
+  return scores;
+}
+
 export interface YakumanChipResult {
   playerId: number;
   chip: number;

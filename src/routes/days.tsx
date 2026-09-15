@@ -22,7 +22,9 @@ import {
   sumScores,
   ORIGIN_SCORE,
   HAKOWARE_AUTO_THRESHOLD,
+  computeLiveScores,
   type DisplayMode,
+  type LiveHandEntry,
 } from "../lib/scoring";
 import { computeDaySummary } from "../lib/aggregate";
 import { YAKU_GROUPS } from "../lib/yaku";
@@ -39,6 +41,30 @@ const WIND_SHORT_LABELS = ["東", "南", "西", "北"] as const;
 // 半荘＝東1〜4局＋南1〜4局の8局。インデックス%4が起家からの席順（＝その局の親）に対応する
 // （東1局と南1局はどちらも起家が親、というように東場・南場で同じ並びが繰り返されるため）。
 const ROUND_OPTIONS = ["東1局", "東2局", "東3局", "東4局", "南1局", "南2局", "南3局", "南4局"] as const;
+
+// hand_logsの生データ（playerId/roundLabel）を、computeLiveScores（src/lib/scoring.ts）が
+// 求める座席インデックス基準の形に変換してから渡す。座標変換とラベル解決はこの画面固有の
+// 関心事なのでroutes側に置き、純粋な点数計算ロジックだけをlib側に切り出してテスト可能にしている。
+function resolveLiveHandEntries(
+  hands: { winType: string; winnerPlayerId: number | null; loserPlayerId: number | null; points: number | null; roundLabel: string | null }[],
+  seatPlayerIds: (number | null)[],
+): LiveHandEntry[] {
+  const seatOfPlayer = new Map<number, number>();
+  seatPlayerIds.forEach((pid, seat) => {
+    if (pid != null) seatOfPlayer.set(pid, seat);
+  });
+
+  return hands.map((h) => {
+    const roundIndex = h.roundLabel ? ROUND_OPTIONS.indexOf(h.roundLabel as (typeof ROUND_OPTIONS)[number]) : -1;
+    return {
+      winType: h.winType,
+      winnerSeat: h.winnerPlayerId != null ? (seatOfPlayer.get(h.winnerPlayerId) ?? null) : null,
+      loserSeat: h.loserPlayerId != null ? (seatOfPlayer.get(h.loserPlayerId) ?? null) : null,
+      dealerSeat: roundIndex >= 0 ? roundIndex % 4 : null,
+      points: h.points,
+    };
+  });
+}
 
 // 局メモ入力フォーム（局の自動補完＋親の自動算出、結果に応じた和了者/対象/テンパイ欄の出し分け、
 // 役選択モーダル）。対局中ページと、対局日詳細の確定済み半荘の「局メモを追加・修正」の両方で使う共通部品。
@@ -355,7 +381,7 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
                   <tr>
                     <td>{WIND_SHORT_LABELS[r.seatIndex] ?? "-"}</td>
                     <td>{r.name}</td>
-                    <td>{r.rawScore ?? "-"}</td>
+                    <td>{r.rawScore != null ? <Signed n={r.rawScore} /> : "-"}</td>
                     <td>{r.rankChip != null ? <Signed n={r.rankChip} /> : "-"}</td>
                   </tr>
                 ))}
@@ -791,6 +817,9 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
   // （次に入力する局・親の算出はHandLogForm内で行う）。
   const advancingCount = hands.filter((h) => h.winType !== "chombo").length;
   const isDone = advancingCount >= ROUND_OPTIONS.length;
+  const currentDealerSeat = Math.min(advancingCount, ROUND_OPTIONS.length - 1) % 4;
+  const seatPlayerIds = [0, 1, 2, 3].map((i) => seatRows.find((s) => s.seatIndex === i)?.playerId ?? null);
+  const liveScores = computeLiveScores(resolveLiveHandEntries(hands, seatPlayerIds));
 
   return c.html(
     <Layout title={`第${session.seq}半荘: 対局中`} isAdmin={true}>
@@ -800,23 +829,24 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
       <h1>第{session.seq}半荘: 対局中</h1>
 
       <div class="card">
-        <h2>座席</h2>
-        <table class="session-table">
-          <thead>
-            <tr>
-              <th>風</th>
-              <th>プレイヤー</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[0, 1, 2, 3].map((i) => (
-              <tr>
-                <td>{WIND_LABELS[i]}</td>
-                <td>{nameBySeat[i]}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <h2>現在のスコア</h2>
+        <p style="font-size:0.8rem; color:var(--ink-soft); margin:0 0 10px">
+          この半荘の中だけの暫定合計です（正式なスコアは撮影・確認画面で確定します）。起家を上、そこから時計回りに南家・西家・北家です。
+        </p>
+        <div class="score-cross">
+          {(["top", "right", "bottom", "left"] as const).map((pos, i) => (
+            <div class={`score-cross-cell score-cross-${pos}`}>
+              <div class="score-cross-wind">
+                {WIND_LABELS[i]}
+                {currentDealerSeat === i && <span class="badge badge-open score-cross-dealer">親</span>}
+              </div>
+              <div class="score-cross-name">{nameBySeat[i]}</div>
+              <div class="score-cross-score">
+                <Signed n={liveScores[i] ?? 0} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div class="card">

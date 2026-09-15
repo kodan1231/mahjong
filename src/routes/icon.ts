@@ -23,7 +23,9 @@ function decode(base64: string): Uint8Array<ArrayBuffer> {
 
 export const iconRoutes = new Hono<{ Bindings: Env }>();
 
-const PNG_HEADERS = { "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" };
+// キャッシュは短めにする。7日指定にしていた頃、アイコンの絵柄を変更してもブラウザ/iOSの
+// キャッシュが古い画像を返し続け「アイコンが変わらない」という問い合わせにつながったため。
+const PNG_HEADERS = { "Content-Type": "image/png", "Cache-Control": "public, max-age=3600" };
 
 iconRoutes.get("/apple-touch-icon.png", (c) => c.body(decode(ICON_180), 200, PNG_HEADERS));
 

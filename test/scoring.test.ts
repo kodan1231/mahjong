@@ -4,6 +4,7 @@ import {
   computeRankAndChips,
   computeYakumanChips,
   sumScores,
+  computeLiveScores,
 } from "../src/lib/scoring";
 
 // アプリ全体で保存・集計する点数の単位は「ポイント」＝配給原点(25000点=25ポイント)からの
@@ -117,5 +118,56 @@ describe("computeYakumanChips", () => {
   it("defaults perLoser to 5", () => {
     const result = computeYakumanChips([1, 2, 3, 4], 1);
     expect(result.find((r) => r.playerId === 1)?.chip).toBe(15);
+  });
+});
+
+describe("computeLiveScores", () => {
+  it("ロン: 和了者+points、対象-pointsのシンプルな授受", () => {
+    const scores = computeLiveScores([
+      { winType: "ron", winnerSeat: 0, loserSeat: 2, dealerSeat: 0, points: 3900 },
+    ]);
+    expect(scores).toEqual([3900, 0, -3900, 0]);
+  });
+
+  it("親のツモ: 3人が均等にpoints/3ずつ支払う", () => {
+    const scores = computeLiveScores([
+      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: 1, points: 6000 },
+    ]);
+    expect(scores).toEqual([-2000, 6000, -2000, -2000]);
+  });
+
+  it("子のツモ: 親がpoints/2、残り2人の子がpoints/4ずつ支払う", () => {
+    const scores = computeLiveScores([
+      { winType: "tsumo", winnerSeat: 3, loserSeat: null, dealerSeat: 2, points: 5200 },
+    ]);
+    expect(scores).toEqual([-1300, -1300, -2600, 5200]);
+  });
+
+  it("流局・チョンボはスコアに反映しない", () => {
+    const scores = computeLiveScores([
+      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 0, points: null },
+      { winType: "chombo", winnerSeat: null, loserSeat: 1, dealerSeat: 0, points: null },
+    ]);
+    expect(scores).toEqual([0, 0, 0, 0]);
+  });
+
+  it("複数局を積み上げた合計（実機E2Eで確認した組み合わせと同じシナリオ）", () => {
+    // 東1局: 起家(0)が西家(2)からロン3900
+    // 東2局: 親=南家(1)がツモ、合計6000（2000オール）
+    // 東3局: 親=西家(2)、子の北家(3)がツモ、合計5200（1300/2600）
+    const scores = computeLiveScores([
+      { winType: "ron", winnerSeat: 0, loserSeat: 2, dealerSeat: 0, points: 3900 },
+      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: 1, points: 6000 },
+      { winType: "tsumo", winnerSeat: 3, loserSeat: null, dealerSeat: 2, points: 5200 },
+    ]);
+    expect(scores).toEqual([600, 4700, -8500, 3200]);
+  });
+
+  it("dealerSeatが分からない場合は起家(0)にフォールバックする", () => {
+    const scores = computeLiveScores([
+      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: null, points: 6000 },
+    ]);
+    // フォールバックで親=0(起家)扱いになるため、非親のツモ配分（親1/2・子1/4ずつ）になる
+    expect(scores).toEqual([-3000, 6000, -1500, -1500]);
   });
 });

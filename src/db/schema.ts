@@ -94,6 +94,8 @@ export const handLogs = sqliteTable("hand_logs", {
   loserPlayerId: integer("loser_player_id").references(() => players.id),
   yakuText: text("yaku_text"),
   points: integer("points"), // その局の点数（例: 3900, 8000など。任意）
+  // 流局時のテンパイ者（playerIdの配列をJSON文字列として保存。例: "[1,3]"）。任意
+  tenpaiPlayerIds: text("tenpai_player_ids"),
   createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
 });
 

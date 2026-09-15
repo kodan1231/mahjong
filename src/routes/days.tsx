@@ -28,6 +28,11 @@ import { computeDaySummary } from "../lib/aggregate";
 
 export const dayRoutes = new Hono<{ Bindings: Env }>();
 
+// seatIndex(0-3)は各半荘の開始時に登録した「起家から見た並び順」を表す固定値。
+// 半荘の途中で自風が変わっても座席登録自体は最初の1回だけなので、ここでの表記は
+// 常にその半荘における起家(0)・南家(1)・西家(2)・北家(3)を指す。
+const WIND_LABELS = ["起家", "南家", "西家", "北家"] as const;
+
 // ---------- 対局日詳細（当日タブ・履歴ドリルダウン共通のデータ取得＆表示） ----------
 
 async function loadDayDetail(db: Db, dayId: number) {
@@ -155,6 +160,7 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
             <table class="session-table">
               <thead>
                 <tr>
+                  <th>風</th>
                   <th>プレイヤー</th>
                   <th>ポイント</th>
                   <th>着順</th>
@@ -164,6 +170,7 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
               <tbody>
                 {rows.map((r) => (
                   <tr>
+                    <td>{WIND_LABELS[r.seatIndex] ?? "-"}</td>
                     <td>{r.name}</td>
                     <td>{r.rawScore ?? "-"}</td>
                     <td>{r.rank ?? "-"}</td>
@@ -518,12 +525,12 @@ dayRoutes.get("/days/:id/sessions/new", requireAdmin, async (c) => {
   return c.html(
     <Layout title="半荘を登録" isAdmin={true}>
       <h1>第{nextSeq}半荘: 座席を登録</h1>
-      <p>管理者から見た座席順（点数表示機に数字が並ぶ順序）でプレイヤーを選んでください。</p>
+      <p>起家から順に（点数表示機に数字が並ぶ順序で）プレイヤーを選んでください。</p>
       <div class="card">
         <form class="stack" method="post" action={`/days/${dayId}/sessions`}>
           {[0, 1, 2, 3].map((seat) => (
             <div class="seat-row">
-              <span class="seat-label">座席{seat + 1}</span>
+              <span class="seat-label">{WIND_LABELS[seat]}</span>
               <div class="choice-group">
                 {participants.map((p) => (
                   <label class="choice-btn">
@@ -738,7 +745,7 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
           return (
             <div class="seat-block">
               <div class="seat-row">
-                <span class="seat-label">座席{r.seatIndex + 1}</span>
+                <span class="seat-label">{WIND_LABELS[r.seatIndex]}</span>
                 <div class="choice-group">
                   {dayParticipantOptions.map((p) => (
                     <label class="choice-btn">

@@ -9,7 +9,9 @@
  * このモジュールはこの計算式のみを扱い、役の判定などは行わない（点数早見表の表示専用）。
  */
 
-const FU_ROWS = [20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110] as const;
+// 60符まで（それ以上は実際の対局でほぼ出ないため「60符まであればいい」というフィードバックで削減）。
+// 25符（七対子固定）も同様に「不要」というフィードバックで削除した。
+const FU_ROWS = [20, 30, 40, 50, 60] as const;
 const HAN_COLS = [1, 2, 3, 4] as const;
 
 function roundUp100(n: number): number {
@@ -22,12 +24,11 @@ function basePoints(fu: number, han: number): number {
 }
 
 // 20符はロンでは実質発生しない（門前ロンの10符加算で必ず30符以上になるため）。
-// 25符（七対子固定）は七対子自体が2翻のため、1翻の組み合わせは発生しない。
 function ronValid(fu: number): boolean {
   return fu !== 20;
 }
-function tsumoValid(fu: number, han: number): boolean {
-  return !(fu === 25 && han === 1);
+function tsumoValid(_fu: number, _han: number): boolean {
+  return true;
 }
 
 export interface DealerCell {
@@ -141,5 +142,62 @@ export const FIXED_TIERS: FixedTier[] = [
     nonDealerRon: 32000,
     nonDealerTsumoOther: 8000,
     nonDealerTsumoDealer: 16000,
+  },
+];
+
+export interface FuCalcGroup {
+  category: string;
+  rows: { item: string; fu: string }[];
+}
+
+/**
+ * 符の算出表（手牌の形から符を積み上げるための早見表）。上のfu×han表は「符が分かっている前提」の
+ * 点数早見表なので、符そのものの数え方が分かる別表として用意した（「符の算出表も欲しい」という要望）。
+ * 合計後は10符単位で切り上げる（例: 22符→30符）。七対子・平和は例外として符が固定される。
+ */
+export const FU_CALC_TABLE: FuCalcGroup[] = [
+  {
+    category: "基本",
+    rows: [
+      { item: "副底（基本点）", fu: "20符" },
+      { item: "門前加符（門前でロン和了）", fu: "+10符" },
+      { item: "自摸符（ツモ和了。平和ツモを除く）", fu: "+2符" },
+    ],
+  },
+  {
+    category: "待ち",
+    rows: [
+      { item: "両面・シャンポン待ち", fu: "+0符" },
+      { item: "カンチャン・ペンチャン・単騎待ち", fu: "+2符" },
+    ],
+  },
+  {
+    category: "雀頭",
+    rows: [
+      { item: "数牌・客風牌", fu: "+0符" },
+      { item: "役牌（三元牌・自風・場風）", fu: "+2符" },
+    ],
+  },
+  {
+    category: "面子（1組ごとに加算）",
+    rows: [
+      { item: "順子", fu: "+0符" },
+      { item: "明刻（中張牌）", fu: "+2符" },
+      { item: "明刻（幺九牌）", fu: "+4符" },
+      { item: "暗刻（中張牌）", fu: "+4符" },
+      { item: "暗刻（幺九牌）", fu: "+8符" },
+      { item: "明槓（中張牌）", fu: "+8符" },
+      { item: "明槓（幺九牌）", fu: "+16符" },
+      { item: "暗槓（中張牌）", fu: "+16符" },
+      { item: "暗槓（幺九牌）", fu: "+32符" },
+    ],
+  },
+  {
+    category: "特殊な符（例外・固定）",
+    rows: [
+      { item: "七対子", fu: "25符固定" },
+      { item: "平和・ロン", fu: "30符固定" },
+      { item: "平和・ツモ", fu: "20符固定" },
+    ],
   },
 ];

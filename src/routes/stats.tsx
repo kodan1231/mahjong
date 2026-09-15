@@ -24,7 +24,7 @@ import {
   computeRankDistributionForAllPlayers,
   computeYakumanHistory,
 } from "../lib/aggregate";
-import { computeScoreTable, FIXED_TIERS } from "../lib/scoreTable";
+import { computeScoreTable, FIXED_TIERS, FU_CALC_TABLE } from "../lib/scoreTable";
 
 export const statsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -136,6 +136,28 @@ statsRoutes.get("/scoretable", async (c) => {
       <p style="font-size:0.85rem; color:var(--felt-soft)">
         符・翻から点数を引く早見表。上段が太字でロンの点数、下段の小さい文字がツモの内訳（子は「他家の支払い/親の支払い」、親は「子3人がそれぞれ支払う額」）。
       </p>
+
+      <div class="card">
+        <h2>符の算出表</h2>
+        <p style="font-size:0.8rem; color:var(--ink-soft); margin:0 0 10px">
+          手牌の形から符を積み上げるための表。合計後は10符単位で切り上げます（例: 22符→30符）。七対子・平和は下記の通り符が固定されます。
+        </p>
+        {FU_CALC_TABLE.map((group) => (
+          <>
+            <h3>{group.category}</h3>
+            <table class="session-table">
+              <tbody>
+                {group.rows.map((row) => (
+                  <tr>
+                    <td style="text-align:left">{row.item}</td>
+                    <td>{row.fu}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        ))}
+      </div>
 
       <div class="card">
         <h2>子（非親）</h2>

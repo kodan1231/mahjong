@@ -64,11 +64,7 @@ describe("computeScoreTable", () => {
     expect(cell.tsumoDealer).toBe(400);
   });
 
-  it("25符1翻（七対子未満の組み合わせ）は発生しないためツモ・ロンともnull、2翻は数値", () => {
-    const invalid = findNonDealer(25, 1);
-    expect(invalid.tsumoOther).toBeNull();
-    expect(invalid.tsumoDealer).toBeNull();
-    const valid = findNonDealer(25, 2);
-    expect(valid.ron).not.toBeNull();
+  it("符は60符までに絞ってある（25符は削除済み）", () => {
+    expect(table.fuRows).toEqual([20, 30, 40, 50, 60]);
   });
 });

@@ -111,7 +111,7 @@ export const TabBar = ({ active }: { active: TabKey }) => (
     <a href="/" class={`tab${active === "today" ? " active" : ""}`}>
       直近
     </a>
-    <a href="/overall" class={`tab${active === "history" ? " active" : ""}`}>
+    <a href={`/years/${new Date().getFullYear()}`} class={`tab${active === "history" ? " active" : ""}`}>
       履歴
     </a>
     <a href="/scoretable" class={`tab${active === "scoretable" ? " active" : ""}`}>

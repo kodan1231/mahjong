@@ -115,8 +115,7 @@ statsRoutes.get("/players/:id", async (c) => {
       <div class="card">
         <h2>通算</h2>
         <p>
-          ポイント合計: <Signed n={mine?.rawTotal ?? 0} /> ／ チップ合計: <Signed n={mine?.chipTotal ?? 0} /> ／ 半荘数:{" "}
-          {gameCount}
+          ポイント合計: <Signed n={mine?.rawTotal ?? 0} /> ／ 半荘数: {gameCount}
         </p>
       </div>
 
@@ -137,7 +136,6 @@ statsRoutes.get("/players/:id", async (c) => {
               <tr>
                 <th>対局日</th>
                 <th>ポイント</th>
-                <th>チップ</th>
               </tr>
             </thead>
             <tbody>
@@ -151,9 +149,6 @@ statsRoutes.get("/players/:id", async (c) => {
                   </td>
                   <td>
                     <Signed n={d.rawTotal} />
-                  </td>
-                  <td>
-                    <Signed n={d.chipTotal} />
                   </td>
                 </tr>
               ))}
@@ -171,7 +166,6 @@ statsRoutes.get("/players/:id", async (c) => {
               <tr>
                 <th>年</th>
                 <th>ポイント合計</th>
-                <th>チップ合計</th>
               </tr>
             </thead>
             <tbody>
@@ -182,9 +176,6 @@ statsRoutes.get("/players/:id", async (c) => {
                   </td>
                   <td>
                     <Signed n={y.rawTotal} />
-                  </td>
-                  <td>
-                    <Signed n={y.chipTotal} />
                   </td>
                 </tr>
               ))}

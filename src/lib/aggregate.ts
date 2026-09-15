@@ -260,11 +260,20 @@ export async function computeRankDistributionForAllPlayers(
     }
   }
 
-  return allPlayers.map((p) => ({
-    playerId: p.id,
-    name: p.name,
-    counts: countsByPlayer.get(p.id) ?? [0, 0, 0, 0],
-  }));
+  return allPlayers
+    .map((p) => ({
+      playerId: p.id,
+      name: p.name,
+      counts: countsByPlayer.get(p.id) ?? ([0, 0, 0, 0] as [number, number, number, number]),
+    }))
+    .sort((a, b) => {
+      // 1着回数の多い順、同数なら2着、3着、4着の回数で降順に比較する
+      for (let i = 0; i < 4; i++) {
+        const diff = (b.counts[i] ?? 0) - (a.counts[i] ?? 0);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    });
 }
 
 export interface YakumanHistoryEntry {

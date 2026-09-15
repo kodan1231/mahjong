@@ -14,6 +14,10 @@ export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean; ext
       <title>{title} - 麻雀スコア集計</title>
       <link rel="icon" href="/favicon.png" type="image/png" />
       <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+      <link rel="manifest" href="/manifest.webmanifest" />
+      {/* iOSのホーム画面追加時の表示名。指定しないとページ<title>がそのまま（長すぎて）使われる */}
+      <meta name="apple-mobile-web-app-title" content="天昇麻雀" />
+      <meta name="apple-mobile-web-app-capable" content="yes" />
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
       <link
@@ -169,6 +173,9 @@ const css = `
     font-size: 0.92rem;
   }
   .tab.active { background: var(--gold); color: #2a2306; }
+  /* 履歴タブ内の年度別/通算サブタブ。メインのタブバーより一回り小さくして階層を示す */
+  .tab-bar-sub { padding: 3px; margin-bottom: 14px; max-width: 280px; }
+  .tab-bar-sub .tab { padding: 6px 6px; font-size: 0.82rem; }
 
   table { width: 100%; border-collapse: collapse; margin: 6px 0; color: var(--ink); }
   th, td { padding: 5px 4px; border-bottom: 1px solid var(--tile-edge); text-align: right; font-variant-numeric: tabular-nums; }
@@ -275,6 +282,12 @@ const css = `
   .card a, table a { color: #0d5c3f; text-decoration-color: rgba(13, 92, 63, 0.4); }
   .card a:hover, table a:hover { color: var(--gold-dark); }
   .app-main > p > a, .card > p > a { text-decoration: none; }
+  /* .btn系リンクは.card a/table aより後ろに強い指定を置いて自前の文字色を守る。
+     「.card a { color: #0d5c3f }」（濃緑）が.btn-secondaryの背景（同じ濃緑var(--felt)）と
+     ほぼ同色になり「点数を編集する」ボタンの文字が見えなくなる不具合があったための対応。 */
+  .card a.btn, table a.btn { color: #2a2306; }
+  .card a.btn-secondary, table a.btn-secondary { color: #fdf9ec; }
+  .card a.btn-danger, table a.btn-danger { color: white; }
 
   details summary { cursor: pointer; font-weight: 700; margin-top: 12px; }
 

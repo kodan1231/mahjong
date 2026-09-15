@@ -103,16 +103,28 @@ export const TotalsTable = ({
   </table>
 );
 
-export type TabKey = "today" | "year" | "overall";
+export type TabKey = "today" | "history" | "scoretable";
 
-/** トップ画面の3タブ（直近 / 年度別 / 通算）。年度別タブのリンク先は指定年（省略時は今年）。 */
-export const TabBar = ({ active, year }: { active: TabKey; year?: number }) => {
+/** トップ画面の3タブ（直近 / 履歴 / 点数表）。履歴タブは年度別・通算をまとめたもの（下のHistorySubTabs参照）。 */
+export const TabBar = ({ active }: { active: TabKey }) => (
+  <nav class="tab-bar">
+    <a href="/" class={`tab${active === "today" ? " active" : ""}`}>
+      直近
+    </a>
+    <a href="/overall" class={`tab${active === "history" ? " active" : ""}`}>
+      履歴
+    </a>
+    <a href="/scoretable" class={`tab${active === "scoretable" ? " active" : ""}`}>
+      点数表
+    </a>
+  </nav>
+);
+
+/** 履歴タブ内の年度別/通算の切り替え（/years/:yearと/overallの両方の先頭に表示する）。 */
+export const HistorySubTabs = ({ active, year }: { active: "year" | "overall"; year?: number }) => {
   const targetYear = year ?? new Date().getFullYear();
   return (
-    <nav class="tab-bar">
-      <a href="/" class={`tab${active === "today" ? " active" : ""}`}>
-        直近
-      </a>
+    <nav class="tab-bar tab-bar-sub">
       <a href={`/years/${targetYear}`} class={`tab${active === "year" ? " active" : ""}`}>
         年度別
       </a>

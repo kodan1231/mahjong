@@ -4,7 +4,7 @@ import type { Env } from "../types";
 import { getDb } from "../db/client";
 import { players, days } from "../db/schema";
 import { Layout } from "../views/layout";
-import { Signed, DailyBarChart, TotalsTable, TabBar } from "../views/components";
+import { Signed, DailyBarChart, TotalsTable, TabBar, RankDistributionTable, YakumanHistoryList } from "../views/components";
 import { isAdmin } from "../lib/auth";
 import {
   computeTotals,
@@ -13,6 +13,8 @@ import {
   computeRankDistribution,
   computePlayerYakumanWins,
   computePlayerDailyBreakdown,
+  computeRankDistributionForAllPlayers,
+  computeYakumanHistory,
 } from "../lib/aggregate";
 
 export const statsRoutes = new Hono<{ Bindings: Env }>();
@@ -25,13 +27,15 @@ statsRoutes.get("/years/:year", async (c) => {
   const admin = await isAdmin(c);
 
   const range = yearRange(year);
-  const [totals, daysInYear] = await Promise.all([
+  const [totals, daysInYear, rankDistribution, yakumanHistory] = await Promise.all([
     computeTotals(db, range),
     db
       .select()
       .from(days)
       .where(and(eq(days.status, "closed"), gte(days.date, range.from!), lt(days.date, range.to!)))
       .orderBy(desc(days.date)),
+    computeRankDistributionForAllPlayers(db, range),
+    computeYakumanHistory(db, range),
   ]);
 
   return c.html(
@@ -45,6 +49,16 @@ statsRoutes.get("/years/:year", async (c) => {
       <div class="card">
         <h2>合計</h2>
         <TotalsTable totals={totals} showHeader={false} />
+      </div>
+
+      <div class="card">
+        <h2>着順分布</h2>
+        <RankDistributionTable distribution={rankDistribution} />
+      </div>
+
+      <div class="card">
+        <h2>役満履歴</h2>
+        <YakumanHistoryList entries={yakumanHistory} />
       </div>
 
       <div class="card">
@@ -69,7 +83,11 @@ statsRoutes.get("/years/:year", async (c) => {
 statsRoutes.get("/overall", async (c) => {
   const db = getDb(c.env);
   const admin = await isAdmin(c);
-  const totals = await computeTotals(db);
+  const [totals, rankDistribution, yakumanHistory] = await Promise.all([
+    computeTotals(db),
+    computeRankDistributionForAllPlayers(db),
+    computeYakumanHistory(db),
+  ]);
 
   return c.html(
     <Layout title="通算成績" isAdmin={admin}>
@@ -77,6 +95,16 @@ statsRoutes.get("/overall", async (c) => {
       <h1>通算成績</h1>
       <div class="card">
         <TotalsTable totals={totals} showHeader={false} />
+      </div>
+
+      <div class="card">
+        <h2>着順分布</h2>
+        <RankDistributionTable distribution={rankDistribution} />
+      </div>
+
+      <div class="card">
+        <h2>役満履歴</h2>
+        <YakumanHistoryList entries={yakumanHistory} />
       </div>
     </Layout>,
   );

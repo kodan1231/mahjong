@@ -221,6 +221,74 @@ export async function computePlayerYakumanWins(db: Db, playerId: number): Promis
     .orderBy(desc(days.date));
 }
 
+export interface PlayerRankDistribution {
+  playerId: number;
+  name: string;
+  /** [1位, 2位, 3位, 4位]の回数 */
+  counts: [number, number, number, number];
+}
+
+/** 指定期間（省略時は全期間）の、プレイヤーごとの着順（1〜4位）回数。年度別・通算タブの表用。 */
+export async function computeRankDistributionForAllPlayers(
+  db: Db,
+  range: DateRange = {},
+): Promise<PlayerRankDistribution[]> {
+  const allPlayers = await db.select().from(players);
+
+  const dayConditions = [];
+  if (range.from) dayConditions.push(gte(days.date, range.from));
+  if (range.to) dayConditions.push(lt(days.date, range.to));
+  const dayRows = await db
+    .select({ id: days.id })
+    .from(days)
+    .where(dayConditions.length ? and(...dayConditions) : undefined);
+  const dayIds = dayRows.map((d) => d.id);
+
+  const countsByPlayer = new Map<number, [number, number, number, number]>();
+  if (dayIds.length > 0) {
+    const rows = await db
+      .select({ playerId: sessionScores.playerId, rank: sessionScores.rank })
+      .from(sessionScores)
+      .innerJoin(gameSessions, eq(sessionScores.gameSessionId, gameSessions.id))
+      .where(and(eq(gameSessions.status, "confirmed"), inArray(gameSessions.dayId, dayIds)));
+
+    for (const row of rows) {
+      if (row.rank == null || row.rank < 1 || row.rank > 4) continue;
+      const arr = countsByPlayer.get(row.playerId) ?? [0, 0, 0, 0];
+      arr[row.rank - 1] = (arr[row.rank - 1] ?? 0) + 1;
+      countsByPlayer.set(row.playerId, arr);
+    }
+  }
+
+  return allPlayers.map((p) => ({
+    playerId: p.id,
+    name: p.name,
+    counts: countsByPlayer.get(p.id) ?? [0, 0, 0, 0],
+  }));
+}
+
+export interface YakumanHistoryEntry {
+  dayId: number;
+  date: string;
+  winnerName: string;
+  yakuName: string;
+}
+
+/** 指定期間（省略時は全期間）の役満履歴（新しい順）。年度別・通算タブの表示用。 */
+export async function computeYakumanHistory(db: Db, range: DateRange = {}): Promise<YakumanHistoryEntry[]> {
+  const dayConditions = [];
+  if (range.from) dayConditions.push(gte(days.date, range.from));
+  if (range.to) dayConditions.push(lt(days.date, range.to));
+
+  return db
+    .select({ dayId: days.id, date: days.date, winnerName: players.name, yakuName: yakumanEvents.yakuName })
+    .from(yakumanEvents)
+    .innerJoin(days, eq(yakumanEvents.dayId, days.id))
+    .innerJoin(players, eq(yakumanEvents.winnerPlayerId, players.id))
+    .where(dayConditions.length ? and(...dayConditions) : undefined)
+    .orderBy(desc(days.date));
+}
+
 export interface PlayerDaySummary {
   dayId: number;
   date: string;

@@ -12,6 +12,8 @@ export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean; ext
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <meta name="robots" content="noindex" />
       <title>{title} - 麻雀スコア集計</title>
+      <link rel="icon" href="/favicon.png" type="image/png" />
+      <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
       <link
@@ -306,6 +308,22 @@ const css = `
 
   /* 小計ブロック入力欄は参加者名・ポイント/チップ欄をまとめて入力の表より少し大きめにする */
   .subtotal-block { font-size: 1.1rem; }
+
+  /* 役選択モーダルなどのオーバーレイ。display:flexをここ（stylesheet）で持たせ、[hidden]で確実に
+     display:noneへ戻せるようにする。要素に直接style="display:flex"を書くとインラインstyleが
+     [hidden]のUAデフォルト(display:none)より優先されてしまい、hidden属性でのJSトグルが効かなくなる
+     （実際に「役選択ダイアログが常に表示されっぱなしでキャンセルが効かない」不具合が起きた）。 */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .modal-overlay[hidden] { display: none; }
 
   @media (max-width: 480px) {
     .app-header { padding: 12px 14px; }

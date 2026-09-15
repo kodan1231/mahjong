@@ -142,11 +142,7 @@ function HandLogForm({
         </button>
       </form>
 
-      <div
-        id={`yaku-modal-${uid}`}
-        hidden
-        style="position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:50; display:flex; align-items:center; justify-content:center; padding:16px"
-      >
+      <div id={`yaku-modal-${uid}`} class="modal-overlay" hidden>
         <div class="card" style="max-height:82vh; overflow-y:auto; max-width:480px; width:100%; margin:0">
           <h2>役を選ぶ</h2>
           {YAKU_GROUPS.map((g) => (

@@ -12,6 +12,56 @@ export const Signed = ({ n, unit = "" }: { n: number; unit?: string }) => {
   );
 };
 
+/** 年度別・通算タブ共通の着順分布テーブル（プレイヤー別の1〜4着回数）。 */
+export const RankDistributionTable = ({
+  distribution,
+}: {
+  distribution: { playerId: number; name: string; counts: [number, number, number, number] }[];
+}) => (
+  <table class="session-table">
+    <thead>
+      <tr>
+        <th>プレイヤー</th>
+        <th>1着</th>
+        <th>2着</th>
+        <th>3着</th>
+        <th>4着</th>
+      </tr>
+    </thead>
+    <tbody>
+      {distribution.map((d) => (
+        <tr>
+          <td>
+            <a href={`/players/${d.playerId}`}>{d.name}</a>
+          </td>
+          <td>{d.counts[0]}</td>
+          <td>{d.counts[1]}</td>
+          <td>{d.counts[2]}</td>
+          <td>{d.counts[3]}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+);
+
+/** 年度別・通算タブ共通の役満履歴一覧。 */
+export const YakumanHistoryList = ({
+  entries,
+}: {
+  entries: { dayId: number; date: string; winnerName: string; yakuName: string }[];
+}) =>
+  entries.length === 0 ? (
+    <p>まだ役満はありません。</p>
+  ) : (
+    <ul>
+      {entries.map((e) => (
+        <li>
+          <a href={`/days/${e.dayId}`}>{e.date}</a>: {e.winnerName} - {e.yakuName}
+        </li>
+      ))}
+    </ul>
+  );
+
 // チップ合計はあくまで付録情報のため、通算/年度別/当日タブの一覧には出さない
 // （個人成績ページと、その日限りのチップ動向がわかる対局日の小計でのみ showChips で表示する）。
 export const TotalsTable = ({

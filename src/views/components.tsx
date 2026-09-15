@@ -73,28 +73,39 @@ export const TabBar = ({ active, year }: { active: TabKey; year?: number }) => {
   );
 };
 
-/** 数値の推移を表すシンプルな折れ線グラフ（追加ライブラリ不要、サーバー側でSVGを生成する）。 */
-export const Sparkline = ({ points }: { points: number[] }) => {
-  if (points.length < 2) return <p>グラフを表示するにはデータが足りません。</p>;
+export interface DailyCandle {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+/**
+ * 登録日単位の累計ポイント推移を表すローソク足チャート（追加ライブラリ不要、サーバー側でSVGを生成する）。
+ * 1本＝1対局日。始値=その日の最初の半荘が始まる前の累計、終値=その日の最後の半荘を終えた時点の累計、
+ * ひげ（高値・安値）=その日の中で累計が到達した最高値・最安値。終値が始値以上なら陽線（プラス色）、
+ * 未満なら陰線（マイナス色）にする。折れ線グラフだと半荘単位の細かい上下が分かりにくいというフィードバックで導入。
+ */
+export const Candlestick = ({ candles }: { candles: DailyCandle[] }) => {
+  if (candles.length === 0) return <p>グラフを表示するにはデータが足りません。</p>;
 
   const width = 600;
-  const height = 140;
-  const padding = 10;
+  const height = 160;
+  const padTop = 10;
+  const padBottom = 10;
+  const padSide = 12;
 
-  const min = Math.min(...points, 0);
-  const max = Math.max(...points, 0);
+  const values = candles.flatMap((c) => [c.open, c.high, c.low, c.close, 0]);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
   const range = max - min || 1;
-  const stepX = points.length > 1 ? (width - padding * 2) / (points.length - 1) : 0;
+  const plotHeight = height - padTop - padBottom;
+  const yFor = (v: number) => padTop + plotHeight * (1 - (v - min) / range);
 
-  const coords = points
-    .map((v, i) => {
-      const x = padding + i * stepX;
-      const y = height - padding - ((v - min) / range) * (height - padding * 2);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-
-  const zeroY = height - padding - ((0 - min) / range) * (height - padding * 2);
+  const slotWidth = (width - padSide * 2) / candles.length;
+  const bodyWidth = Math.max(2, Math.min(slotWidth * 0.6, 18));
+  const zeroY = yFor(0);
 
   return (
     <svg
@@ -103,8 +114,24 @@ export const Sparkline = ({ points }: { points: number[] }) => {
       viewBox={`0 0 ${width} ${height}`}
       style="max-width:100%; height:auto; display:block"
     >
-      <line x1={padding} y1={zeroY} x2={width - padding} y2={zeroY} stroke="#ccc" stroke-dasharray="4,4" />
-      <polyline points={coords} fill="none" stroke="#2563eb" stroke-width="2" />
+      <line x1={0} y1={zeroY} x2={width} y2={zeroY} stroke="#ccc" stroke-dasharray="4,4" />
+      {candles.map((c, i) => {
+        const cx = padSide + slotWidth * i + slotWidth / 2;
+        const isUp = c.close >= c.open;
+        const color = isUp ? "#2f9e58" : "#c0392b";
+        const yHigh = yFor(c.high);
+        const yLow = yFor(c.low);
+        const yOpen = yFor(c.open);
+        const yClose = yFor(c.close);
+        const bodyTop = Math.min(yOpen, yClose);
+        const bodyHeight = Math.max(Math.abs(yClose - yOpen), 1.5);
+        return (
+          <g>
+            <line x1={cx} y1={yHigh} x2={cx} y2={yLow} stroke={color} stroke-width="1.5" />
+            <rect x={cx - bodyWidth / 2} y={bodyTop} width={bodyWidth} height={bodyHeight} fill={color} />
+          </g>
+        );
+      })}
     </svg>
   );
 };

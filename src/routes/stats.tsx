@@ -4,7 +4,7 @@ import type { Env } from "../types";
 import { getDb } from "../db/client";
 import { players, days } from "../db/schema";
 import { Layout } from "../views/layout";
-import { Signed, Sparkline, TotalsTable, TabBar } from "../views/components";
+import { Signed, Candlestick, TotalsTable, TabBar } from "../views/components";
 import { isAdmin } from "../lib/auth";
 import {
   computeTotals,
@@ -12,7 +12,7 @@ import {
   computePlayerYearlyBreakdown,
   computeRankDistribution,
   computePlayerYakumanWins,
-  computePlayerScoreHistory,
+  computePlayerDailyCandles,
 } from "../lib/aggregate";
 
 export const statsRoutes = new Hono<{ Bindings: Env }>();
@@ -92,12 +92,12 @@ statsRoutes.get("/players/:id", async (c) => {
   const [player] = await db.select().from(players).where(eq(players.id, playerId));
   if (!player) return c.notFound();
 
-  const [overall, yearly, rankDist, yakumanWins, history] = await Promise.all([
+  const [overall, yearly, rankDist, yakumanWins, candles] = await Promise.all([
     computeTotals(db),
     computePlayerYearlyBreakdown(db, playerId),
     computeRankDistribution(db, playerId),
     computePlayerYakumanWins(db, playerId),
-    computePlayerScoreHistory(db, playerId),
+    computePlayerDailyCandles(db, playerId),
   ]);
   const mine = overall.find((t) => t.playerId === playerId);
   const gameCount = rankDist.reduce((sum, r) => sum + r.count, 0);
@@ -112,13 +112,14 @@ statsRoutes.get("/players/:id", async (c) => {
           ポイント合計: <Signed n={mine?.rawTotal ?? 0} /> ／ チップ合計: <Signed n={mine?.chipTotal ?? 0} /> ／ 半荘数:{" "}
           {gameCount}
         </p>
-        {history.length >= 2 && (
+        {candles.length > 0 && (
           <p style="font-size:0.8rem; color:var(--ink-soft); margin:6px 0 2px">
-            通算ポイントの推移（横軸: 確定した半荘を{history[0]!.date}〜{history[history.length - 1]!.date}
-            の古い順に並べたもの／縦軸: その時点までの累計ポイント）
+            通算ポイントの推移（{candles[0]!.date}〜{candles[candles.length - 1]!.date}
+            、1本＝1対局日）。上下のひげがその日の最高値・最安値、太い部分が始値（前日までの累計）と終値（その日の累計）。
+            緑＝その日プラスで終えた（陽線）、赤＝マイナスで終えた（陰線）
           </p>
         )}
-        <Sparkline points={history.map((h) => h.cumulativeRaw)} />
+        <Candlestick candles={candles} />
       </div>
 
       <div class="card">

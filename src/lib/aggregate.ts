@@ -221,14 +221,24 @@ export async function computePlayerYakumanWins(db: Db, playerId: number): Promis
     .orderBy(desc(days.date));
 }
 
-export interface ScorePoint {
+export interface DailyCandle {
   date: string;
-  seq: number;
-  cumulativeRaw: number;
+  /** その日の最初の半荘が始まる前の累計ポイント（前日までの終値） */
+  open: number;
+  /** その日の中で累計ポイントが到達した最高値 */
+  high: number;
+  /** その日の中で累計ポイントが到達した最安値 */
+  low: number;
+  /** その日の最後の半荘を終えた時点の累計ポイント */
+  close: number;
 }
 
-/** 確定済み半荘を古い順に並べ、素点差分（対配給原点）の累計推移を返す。折れ線グラフ用。 */
-export async function computePlayerScoreHistory(db: Db, playerId: number): Promise<ScorePoint[]> {
+/**
+ * 確定済み半荘を古い順に並べ、累計ポイントの推移を「登録日単位」の四本値（始値/高値/安値/終値）に
+ * 集約して返す。ローソク足チャート用。折れ線グラフだと半荘単位の細かい上下が分かりにくいという
+ * フィードバックを受け、日単位でその日の増減方向（陽線/陰線）と振れ幅（高値-安値）を見せる方式に変更した。
+ */
+export async function computePlayerDailyCandles(db: Db, playerId: number): Promise<DailyCandle[]> {
   const rows = await db
     .select({
       date: days.date,
@@ -244,9 +254,21 @@ export async function computePlayerScoreHistory(db: Db, playerId: number): Promi
     .filter((r): r is typeof r & { rawScore: number } => r.rawScore != null)
     .sort((a, b) => (a.date === b.date ? a.seq - b.seq : a.date.localeCompare(b.date)));
 
+  const candles: DailyCandle[] = [];
   let cumulative = 0;
-  return sorted.map((r) => {
+  let current: DailyCandle | null = null;
+
+  for (const r of sorted) {
+    if (!current || current.date !== r.date) {
+      if (current) candles.push(current);
+      current = { date: r.date, open: cumulative, high: cumulative, low: cumulative, close: cumulative };
+    }
     cumulative += r.rawScore;
-    return { date: r.date, seq: r.seq, cumulativeRaw: cumulative };
-  });
+    current.high = Math.max(current.high, cumulative);
+    current.low = Math.min(current.low, cumulative);
+    current.close = cumulative;
+  }
+  if (current) candles.push(current);
+
+  return candles;
 }

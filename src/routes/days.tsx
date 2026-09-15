@@ -717,8 +717,6 @@ dayRoutes.get("/days/:id/sessions/new", requireAdmin, async (c) => {
 
   const existingSessions = await db.select().from(gameSessions).where(eq(gameSessions.dayId, dayId));
   const nextSeq = existingSessions.length + 1;
-  const lastMode: DisplayMode =
-    (existingSessions[existingSessions.length - 1]?.displayMode as DisplayMode | undefined) ?? "raw";
 
   return c.html(
     <Layout title="半荘を登録" isAdmin={true}>
@@ -740,17 +738,8 @@ dayRoutes.get("/days/:id/sessions/new", requireAdmin, async (c) => {
             </div>
           ))}
 
-          <label>表示形式</label>
-          <label style="font-weight:normal">
-            <input type="radio" name="displayMode" value="raw" checked={lastMode === "raw"} /> 素点をそのまま表示
-          </label>
-          <label style="font-weight:normal">
-            <input type="radio" name="displayMode" value="diff" checked={lastMode === "diff"} /> 配給原点(
-            {ORIGIN_SCORE})からの±差分表示
-          </label>
-
           <button class="btn" type="submit">
-            登録して撮影へ
+            登録する
           </button>
         </form>
       </div>
@@ -763,7 +752,9 @@ dayRoutes.post("/days/:id/sessions", requireAdmin, async (c) => {
   const db = getDb(c.env);
   const body = await c.req.parseBody();
 
-  const displayMode = (body.displayMode === "diff" ? "diff" : "raw") as DisplayMode;
+  // 表示形式（素点そのまま／配給原点からの差分）は、対局が終わって点数表示機を実際に
+  // 見るまでどちらなのか分からないため、座席登録の時点では聞かない。撮影・確認画面側で選ぶ。
+  const displayMode: DisplayMode = "raw";
   const seatPlayerIds = [0, 1, 2, 3].map((seat) => Number(body[`seat${seat}`]));
 
   const existingSessions = await db.select().from(gameSessions).where(eq(gameSessions.dayId, dayId));
@@ -1020,7 +1011,12 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
     }
   }
 
-  const displayMode = session.displayMode as DisplayMode;
+  // 表示形式（素点そのまま／配給原点からの差分）は座席登録時には決めず、点数表示機を実際に見た
+  // ここ（確認画面）で選んでもらう。?modeクエリで切り替えると、OCRの生の読み取り値からの
+  // プリフィル計算だけがその場でやり直される（すでに入力・保存済みの値はそのまま優先される）。
+  const modeQuery = c.req.query("mode");
+  const displayMode: DisplayMode =
+    modeQuery === "diff" || modeQuery === "raw" ? modeQuery : (session.displayMode as DisplayMode);
   const tieWarning = c.req.query("tie") === "1";
   const badSumWarning = c.req.query("badsum") === "1";
 
@@ -1037,8 +1033,15 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
       )}
       <p>
         点数表示機の表示形式:{" "}
-        {displayMode === "diff" ? `配給原点(${ORIGIN_SCORE}ポイント)からの±差分` : "素点をそのまま表示"}
-        （入力欄には配給原点からの増減が自動計算されて入ります。4人の合計は必ず0になります）
+        <a href={`/days/${dayId}/sessions/${sessionId}/confirm?mode=raw`} style={displayMode === "raw" ? "font-weight:900; text-decoration:underline" : ""}>
+          素点をそのまま表示
+        </a>
+        {" ／ "}
+        <a href={`/days/${dayId}/sessions/${sessionId}/confirm?mode=diff`} style={displayMode === "diff" ? "font-weight:900; text-decoration:underline" : ""}>
+          配給原点({ORIGIN_SCORE})からの±差分表示
+        </a>
+        <br />
+        （実際に表示機を見て、どちらの形式で数字が出ているかを選んでください。下の入力欄にはその形式に合わせて配給原点からの増減が自動計算されて入ります。4人の合計は必ず0になります）
         {latestPhoto && (
           <>
             {" ／ "}

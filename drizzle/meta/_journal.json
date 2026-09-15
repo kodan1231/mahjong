@@ -43,6 +43,13 @@
       "when": 1789406875542,
       "tag": "0005_chubby_gladiator",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789437662482,
+      "tag": "0006_orange_pyro",
+      "breakpoints": true
     }
   ]
 }

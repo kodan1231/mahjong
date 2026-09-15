@@ -1,0 +1,1 @@
+ALTER TABLE `hand_logs` ADD `points` integer;

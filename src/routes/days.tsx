@@ -25,6 +25,7 @@ import {
   type DisplayMode,
 } from "../lib/scoring";
 import { computeDaySummary } from "../lib/aggregate";
+import { YAKU_GROUPS } from "../lib/yaku";
 
 export const dayRoutes = new Hono<{ Bindings: Env }>();
 
@@ -32,6 +33,10 @@ export const dayRoutes = new Hono<{ Bindings: Env }>();
 // 半荘の途中で自風が変わっても座席登録自体は最初の1回だけなので、ここでの表記は
 // 常にその半荘における起家(0)・南家(1)・西家(2)・北家(3)を指す。
 const WIND_LABELS = ["起家", "南家", "西家", "北家"] as const;
+
+// 半荘＝東1〜4局＋南1〜4局の8局。インデックス%4が起家からの席順（＝その局の親）に対応する
+// （東1局と南1局はどちらも起家が親、というように東場・南場で同じ並びが繰り返されるため）。
+const ROUND_OPTIONS = ["東1局", "東2局", "東3局", "東4局", "南1局", "南2局", "南3局", "南4局"] as const;
 
 // ---------- 対局日詳細（当日タブ・履歴ドリルダウン共通のデータ取得＆表示） ----------
 
@@ -187,13 +192,15 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
                   {hands.map((h) => (
                     <li>
                       {h.roundLabel ? `${h.roundLabel}: ` : ""}
-                      {h.winType === "draw"
-                        ? "流局"
-                        : `${rows.find((r) => r.playerId === h.winnerPlayerId)?.name ?? "?"} が${
-                            h.winType === "tsumo"
-                              ? "ツモ"
-                              : `${rows.find((r) => r.playerId === h.loserPlayerId)?.name ?? "?"}から ロン`
-                          }`}
+                      {h.winType === "draw" && "流局"}
+                      {h.winType === "chombo" &&
+                        `チョンボ（${rows.find((r) => r.playerId === h.loserPlayerId)?.name ?? "?"}）`}
+                      {h.winType === "tsumo" && `${rows.find((r) => r.playerId === h.winnerPlayerId)?.name ?? "?"}がツモ`}
+                      {h.winType === "ron" &&
+                        `${rows.find((r) => r.playerId === h.winnerPlayerId)?.name ?? "?"}が${
+                          rows.find((r) => r.playerId === h.loserPlayerId)?.name ?? "?"
+                        }からロン`}
+                      {h.points ? ` ${h.points}点` : ""}
                       {h.yakuText ? `（${h.yakuText}）` : ""}
                       {admin && (
                         <form class="inline-form" method="post" action={`/days/${dayId}/hands/${h.id}/delete`}>
@@ -215,9 +222,14 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
                     小計ブロックのため個別編集はできません。修正する場合は削除してから「まとめて入力」の小計欄で入力し直してください。
                   </span>
                 ) : s.status === "pending" ? (
-                  <a class="btn" href={`/days/${dayId}/sessions/${s.id}/capture`}>
-                    点数表示機を撮影する
-                  </a>
+                  <>
+                    <a class="btn" href={`/days/${dayId}/sessions/${s.id}`}>
+                      対局を記録する
+                    </a>
+                    <a class="btn btn-secondary" href={`/days/${dayId}/sessions/${s.id}/capture`}>
+                      点数表示機を撮影する
+                    </a>
+                  </>
                 ) : (
                   <a class="btn btn-secondary" href={`/days/${dayId}/sessions/${s.id}/confirm`}>
                     点数を編集する
@@ -235,24 +247,25 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
               </p>
             )}
 
-            {admin && (
+            {admin && !isSubtotalBlock && s.status === "confirmed" && (
               <details>
-                <summary>局メモを追加</summary>
+                <summary>局メモを追加・修正</summary>
                 <form class="stack" method="post" action={`/days/${dayId}/sessions/${s.id}/hands`}>
                   <label>種別</label>
                   <select name="winType">
                     <option value="ron">ロン</option>
                     <option value="tsumo">ツモ</option>
                     <option value="draw">流局</option>
+                    <option value="chombo">チョンボ</option>
                   </select>
-                  <label>和了者（流局時は不要）</label>
+                  <label>和了者（流局・チョンボ時は不要）</label>
                   <select name="winnerPlayerId">
                     <option value="">-</option>
                     {participants.map((p) => (
                       <option value={p.playerId}>{p.name}</option>
                     ))}
                   </select>
-                  <label>放銃者（ロンの時のみ）</label>
+                  <label>対象（ロン=放銃者／チョンボ=対象者。それ以外は不要）</label>
                   <select name="loserPlayerId">
                     <option value="">-</option>
                     {participants.map((p) => (
@@ -261,6 +274,8 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
                   </select>
                   <label>局（任意、例: 東1局）</label>
                   <input type="text" name="roundLabel" />
+                  <label>点数（任意）</label>
+                  <input type="number" step="100" name="points" />
                   <label>役・メモ</label>
                   <input type="text" name="yakuText" />
                   <button class="btn" type="submit">
@@ -586,7 +601,251 @@ dayRoutes.post("/days/:id/sessions", requireAdmin, async (c) => {
     );
   }
 
-  return c.redirect(`/days/${dayId}/sessions/${session?.id}/capture`);
+  return c.redirect(`/days/${dayId}/sessions/${session?.id}`);
+});
+
+// ---------- 対局中（局メモのライブ入力） ----------
+
+dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
+  const dayId = Number(c.req.param("id"));
+  const sessionId = Number(c.req.param("sid"));
+  const db = getDb(c.env);
+
+  const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));
+  if (!session) return c.notFound();
+
+  const seatRows = await db
+    .select({ seatIndex: sessionScores.seatIndex, playerId: sessionScores.playerId, name: players.name })
+    .from(sessionScores)
+    .innerJoin(players, eq(sessionScores.playerId, players.id))
+    .where(eq(sessionScores.gameSessionId, sessionId))
+    .orderBy(asc(sessionScores.seatIndex));
+
+  const hands = await db
+    .select()
+    .from(handLogs)
+    .where(eq(handLogs.gameSessionId, sessionId))
+    .orderBy(asc(handLogs.id));
+
+  const nameBySeat = [0, 1, 2, 3].map((i) => seatRows.find((s) => s.seatIndex === i)?.name ?? "?");
+  const nameByPlayerId = new Map(seatRows.map((s) => [s.playerId, s.name]));
+
+  // チョンボは局を進めない扱いにする（同じ局をやり直すことが多いため）。
+  const advancingCount = hands.filter((h) => h.winType !== "chombo").length;
+  const nextRoundIndex = Math.min(advancingCount, ROUND_OPTIONS.length - 1);
+  const isDone = advancingCount >= ROUND_OPTIONS.length;
+
+  return c.html(
+    <Layout title={`第${session.seq}半荘: 対局中`} isAdmin={true}>
+      <p>
+        <a href={`/days/${dayId}`}>← 対局日の詳細に戻る</a>
+      </p>
+      <h1>第{session.seq}半荘: 対局中</h1>
+
+      <div class="card">
+        <h2>座席</h2>
+        <table class="session-table">
+          <thead>
+            <tr>
+              <th>風</th>
+              <th>プレイヤー</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[0, 1, 2, 3].map((i) => (
+              <tr>
+                <td>{WIND_LABELS[i]}</td>
+                <td>{nameBySeat[i]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>局メモ</h2>
+        {hands.length === 0 && <p>まだ記録がありません。</p>}
+        {hands.length > 0 && (
+          <ul>
+            {hands.map((h) => {
+              const winnerName = h.winnerPlayerId != null ? (nameByPlayerId.get(h.winnerPlayerId) ?? "?") : null;
+              const targetName = h.loserPlayerId != null ? (nameByPlayerId.get(h.loserPlayerId) ?? "?") : null;
+              return (
+                <li>
+                  {h.roundLabel ? `${h.roundLabel}: ` : ""}
+                  {h.winType === "draw" && "流局"}
+                  {h.winType === "chombo" && `チョンボ（${targetName ?? "?"}）`}
+                  {h.winType === "tsumo" && `${winnerName}がツモ`}
+                  {h.winType === "ron" && `${winnerName}が${targetName}からロン`}
+                  {h.points ? ` ${h.points}点` : ""}
+                  {h.yakuText ? `（${h.yakuText}）` : ""}
+                  <form class="inline-form" method="post" action={`/days/${dayId}/hands/${h.id}/delete`}>
+                    <button class="link-button" type="submit">
+                      [削除]
+                    </button>
+                  </form>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <h3>局メモを追加</h3>
+        <form class="stack" method="post" action={`/days/${dayId}/sessions/${sessionId}/hands`}>
+          <label for="round-select">局</label>
+          <select name="roundLabel" id="round-select">
+            {ROUND_OPTIONS.map((label, i) => (
+              <option value={label} selected={i === nextRoundIndex}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <p style="margin:0">
+            親: <strong id="dealer-name">{nameBySeat[nextRoundIndex % 4]}</strong>
+          </p>
+
+          <label>結果</label>
+          <div class="choice-group" id="result-group">
+            <label class="choice-btn">
+              <input type="radio" name="winType" value="ron" checked /> ロン
+            </label>
+            <label class="choice-btn">
+              <input type="radio" name="winType" value="tsumo" /> ツモ
+            </label>
+            <label class="choice-btn">
+              <input type="radio" name="winType" value="draw" /> 流局
+            </label>
+            <label class="choice-btn">
+              <input type="radio" name="winType" value="chombo" /> チョンボ
+            </label>
+          </div>
+
+          <div id="winner-field">
+            <label>和了者</label>
+            <div class="choice-group">
+              {seatRows.map((p) => (
+                <label class="choice-btn">
+                  <input type="radio" name="winnerPlayerId" value={p.playerId} /> {p.name}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div id="target-field">
+            <label>対象</label>
+            <div class="choice-group">
+              {seatRows.map((p) => (
+                <label class="choice-btn">
+                  <input type="radio" name="loserPlayerId" value={p.playerId} /> {p.name}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <label for="points-input">点数（任意）</label>
+          <input type="number" step="100" name="points" id="points-input" />
+
+          <label>役（任意）</label>
+          <p>
+            <button type="button" class="btn btn-secondary" id="yaku-btn">
+              役を選ぶ
+            </button>
+          </p>
+          <p id="yaku-summary" style="font-size:0.9rem; color:var(--ink-soft)"></p>
+          <input type="hidden" name="yakuText" id="yaku-text-input" />
+
+          <button class="btn" type="submit">
+            この局を記録する
+          </button>
+        </form>
+      </div>
+
+      {isDone && (
+        <div class="card">
+          <h2>南4局まで終了しました</h2>
+          <p style="display:flex; gap:10px; flex-wrap:wrap">
+            <a class="btn" href={`/days/${dayId}/sessions/${sessionId}/capture`}>
+              点数表示機を撮影する
+            </a>
+            <a class="btn btn-secondary" href={`/days/${dayId}/sessions/${sessionId}/confirm`}>
+              撮影せずに手入力する
+            </a>
+          </p>
+        </div>
+      )}
+
+      <div
+        id="yaku-modal"
+        hidden
+        style="position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:50; display:flex; align-items:center; justify-content:center; padding:16px"
+      >
+        <div class="card" style="max-height:82vh; overflow-y:auto; max-width:480px; width:100%; margin:0">
+          <h2>役を選ぶ</h2>
+          {YAKU_GROUPS.map((g) => (
+            <>
+              <h3>{g.label}</h3>
+              {g.options.map((name) => (
+                <label style="display:block; font-weight:normal; padding:4px 0">
+                  <input type="checkbox" class="yaku-checkbox" value={name} /> {name}
+                </label>
+              ))}
+            </>
+          ))}
+          <p style="display:flex; gap:10px; margin-top:12px">
+            <button type="button" class="btn" id="yaku-confirm">
+              決定
+            </button>
+            <button type="button" class="btn btn-secondary" id="yaku-cancel">
+              キャンセル
+            </button>
+          </p>
+        </div>
+      </div>
+
+      <script
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{
+          __html: `
+            const seatNames = ${JSON.stringify(nameBySeat)};
+            const roundSelect = document.getElementById('round-select');
+            const dealerName = document.getElementById('dealer-name');
+            function updateDealer() {
+              dealerName.textContent = seatNames[roundSelect.selectedIndex % 4];
+            }
+            roundSelect.addEventListener('change', updateDealer);
+
+            const winnerField = document.getElementById('winner-field');
+            const targetField = document.getElementById('target-field');
+            function updateResultFields() {
+              const checked = document.querySelector('input[name=winType]:checked');
+              const val = checked ? checked.value : 'ron';
+              winnerField.hidden = !(val === 'ron' || val === 'tsumo');
+              targetField.hidden = !(val === 'ron' || val === 'chombo');
+            }
+            document.querySelectorAll('input[name=winType]').forEach((el) => {
+              el.addEventListener('change', updateResultFields);
+            });
+            updateResultFields();
+
+            const yakuBtn = document.getElementById('yaku-btn');
+            const yakuModal = document.getElementById('yaku-modal');
+            const yakuConfirm = document.getElementById('yaku-confirm');
+            const yakuCancel = document.getElementById('yaku-cancel');
+            const yakuSummary = document.getElementById('yaku-summary');
+            const yakuTextInput = document.getElementById('yaku-text-input');
+            yakuBtn.addEventListener('click', () => { yakuModal.hidden = false; });
+            yakuCancel.addEventListener('click', () => { yakuModal.hidden = true; });
+            yakuConfirm.addEventListener('click', () => {
+              const checked = Array.from(document.querySelectorAll('.yaku-checkbox:checked')).map((el) => el.value);
+              yakuTextInput.value = checked.join('、');
+              yakuSummary.textContent = checked.join('、');
+              yakuModal.hidden = true;
+            });
+          `,
+        }}
+      />
+    </Layout>,
+  );
 });
 
 // ---------- 撮影 ----------
@@ -897,21 +1156,28 @@ dayRoutes.post("/days/:id/sessions/:sid/hands", requireAdmin, async (c) => {
   const db = getDb(c.env);
   const body = await c.req.parseBody();
 
-  const winType = String(body.winType ?? "ron") as "ron" | "tsumo" | "draw";
+  const winType = String(body.winType ?? "ron") as "ron" | "tsumo" | "draw" | "chombo";
   const winnerPlayerId = body.winnerPlayerId ? Number(body.winnerPlayerId) : null;
   const loserPlayerId = body.loserPlayerId ? Number(body.loserPlayerId) : null;
   const roundLabel = body.roundLabel ? String(body.roundLabel) : null;
   const yakuText = body.yakuText ? String(body.yakuText) : null;
+  const points = body.points ? Number(body.points) : null;
 
   await db.insert(handLogs).values({
     gameSessionId: sessionId,
     winType,
-    winnerPlayerId: winType === "draw" ? null : winnerPlayerId,
-    loserPlayerId: winType === "ron" ? loserPlayerId : null,
+    winnerPlayerId: winType === "ron" || winType === "tsumo" ? winnerPlayerId : null,
+    // ロン時は放銃者、チョンボ時はチョンボした対象プレイヤーとしてloserPlayerIdを使い回す
+    loserPlayerId: winType === "ron" || winType === "chombo" ? loserPlayerId : null,
     roundLabel,
     yakuText,
+    points: Number.isFinite(points) ? points : null,
   });
 
+  const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));
+  if (session?.status === "pending") {
+    return c.redirect(`/days/${dayId}/sessions/${sessionId}`);
+  }
   return c.redirect(`/days/${dayId}`);
 });
 

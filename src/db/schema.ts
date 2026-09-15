@@ -88,10 +88,12 @@ export const handLogs = sqliteTable("hand_logs", {
   gameSessionId: integer("game_session_id").notNull().references(() => gameSessions.id),
   seq: integer("seq"), // 何局目か（任意）
   roundLabel: text("round_label"), // 「東1局」等（任意）
-  winType: text("win_type", { enum: ["ron", "tsumo", "draw"] }).notNull(),
+  winType: text("win_type", { enum: ["ron", "tsumo", "draw", "chombo"] }).notNull(),
   winnerPlayerId: integer("winner_player_id").references(() => players.id),
+  // ロン時は放銃者、チョンボ時はチョンボした対象プレイヤーを指す（UI上はどちらも「対象」と表現する）
   loserPlayerId: integer("loser_player_id").references(() => players.id),
   yakuText: text("yaku_text"),
+  points: integer("points"), // その局の点数（例: 3900, 8000など。任意）
   createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
 });
 

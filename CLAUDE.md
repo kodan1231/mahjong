@@ -60,7 +60,7 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
 - `yakuman_events`: id, dayId, gameSessionId(nullable), winnerPlayerId, yakuName, chipPerLoser(default 5)
 - `yakuman_event_targets`: id, yakumanEventId, playerId
   - 役満登録時にチップを払う対象者をチェックボックスで選び、その時点のIDリストをスナップショットとして保存する。`day_participants`を後から編集しても、既に登録済みの役満チップ集計は変わらない（`src/lib/aggregate.ts`の`yakumanChipsForDays`はこのテーブルを参照する）
-- `hand_logs`: id, gameSessionId, seq, roundLabel, winType(`ron`/`tsumo`/`draw`), winnerPlayerId, loserPlayerId, yakuText
+- `hand_logs`: id, gameSessionId, seq, roundLabel, winType(`ron`/`tsumo`/`draw`/`chombo`。chomboは2026-09-16追加), winnerPlayerId, loserPlayerId（ロン=放銃者／チョンボ=対象者として使い回す）, yakuText, points（その局の点数。2026-09-16追加）
 - `photo_uploads`: id, gameSessionId, imageData(blob), contentType, ocrRawJson
 - `settings`: key/value（現状未使用、将来の設定用に予約）
 
@@ -97,7 +97,7 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
   - `GET /overall`（通算タブ。全期間の合計テーブルのみ）
   - `GET /days/:id`（対局日の詳細。年タブから日付をクリックして辿り着く想定）
   - `GET /players/:id`（個人成績：通算合計・**日別集計**（`?year=`で年指定、省略時はそのプレイヤーの最新の対局年）・年別内訳・着順分布・役満一覧。日別集計は0起点棒グラフ（`DailyBarChart`）＋対局日一覧テーブルのセット（2026-09-16追加。「日別集計も載せて欲しい」というフィードバックへの対応）で、`/years/:year`と同じ前年/次年ナビ（`?year=${selectedYear-1}`等）を持つ。**通算の数値はここでのみ表示**し、他のページではプレイヤー名のリンク経由でここに誘導する）
-- 管理者専用: `/login`, `/players`, `/days/new`, `POST /days/close`, `/days/:id/edit`, `POST /days/:id/delete`（対局日自体の削除。半荘・スコア・役満・局メモ・写真をすべてカスケード削除する。誤登録した対局日を消すための導線。`/days/:id/edit`ページ下部に確認ダイアログ付きボタンを設置）, `/days/:id/sessions/new`, `/days/:id/sessions/:sid/capture`, `/api/ocr`, `/days/:id/sessions/:sid/confirm`, `/days/:id/yakuman`, `/days/:id/sessions/:sid/hands`, `/days/:id/sheet`（下記）, 各種delete系ルート
+- 管理者専用: `/login`, `/players`, `/days/new`, `POST /days/close`, `/days/:id/edit`, `POST /days/:id/delete`（対局日自体の削除。半荘・スコア・役満・局メモ・写真をすべてカスケード削除する。誤登録した対局日を消すための導線。`/days/:id/edit`ページ下部に確認ダイアログ付きボタンを設置）, `/days/:id/sessions/new`, `GET /days/:id/sessions/:sid`（**対局中ページ**。下記「対局中の局メモ入力」参照）, `/days/:id/sessions/:sid/capture`, `/api/ocr`, `/days/:id/sessions/:sid/confirm`, `/days/:id/yakuman`, `/days/:id/sessions/:sid/hands`, `/days/:id/sheet`（下記）, 各種delete系ルート
 
 ### まとめて入力（スプレッドシート風の一括登録、過去履歴のバックフィル向け）
 
@@ -128,6 +128,23 @@ Cloudflare Workers + D1 + Workers AI (Hono) で構築。詳細なセットアッ
 - **小計ブロックの見分け方**: 専用のフラグ列は追加していない。`session_scores`の全行で`rank === null && rankChip !== null`という組み合わせは小計ブロックでしか発生しない（同点未確定の行は`rank`も`rankChip`も両方null、通常の確定済み行は両方とも非null）ため、これを目印として`DayDetailBody`（`src/routes/days.tsx`の`isSubtotalBlock`）が判定している。日別ページの半荘一覧カードでは見出しが「第N半荘」ではなく「小計（ラベル）」になり、**「点数を編集する」リンクを出さない**（通常の半荘確認画面(`/days/:id/sessions/:sid/confirm`)を開くと`computeRankAndChips`が呼ばれ、手入力したチップ値が自動計算で上書きされてしまうため）。修正したい場合は削除してから小計欄で入力し直す運用にしている
 - **通常行のPOST処理は小計ブロックの行を一切触らない**（2026-09-16修正・重要）: 小計ブロックの数値は「まとめて入力」のメイン表にも該当seqの行としてプリフィルされて表示される（列のうち小計に含まれた参加者だけ値が入る）。以前はこの状態で他の行を編集して「まとめて保存」を押すと、小計ブロックの行がメイン表の通常ルール（4人ぴったり必須・自動着順計算）で再処理されてしまい、「4人分そろっていない」エラー扱いになったり、手入力したチップが自動計算で上書きされたりする不具合があった。現在は`POST /days/:id/sheet`の冒頭で既存の`session_scores`を読み込んで小計ブロックのセッションID集合（`subtotalSessionIds`）を作り、メインループの先頭でそのseqなら即座に`continue`して完全にスキップする（`highestRealSeq`の更新だけ行う）
 - `game_sessions.memo`カラム（2026-09-16のマイグレーション`drizzle/0005_chubby_gladiator.sql`で追加）は現状この小計ブロックのラベル専用。通常の半荘では未使用
+
+### 対局中の局メモ入力（起家からの座席表記、局メモのライブ入力、2026-09-16追加）
+
+半荘開始（座席登録）→ 局が進むたびに局メモを更新 → 南4局まで終わったら点数撮影、という流れをアプリ上でたどれるようにした。「座席1、2、3ではなく起家、南家、西家、北家の表現がいい」「半荘開始時に参加者登録を行い、局が進むたびに局メモを更新、最後南4局まで終わったところで点数撮影の流れができるようにフローを検討してほしい」というフィードバックへの対応。
+
+- **起家/南家/西家/北家**: `WIND_LABELS = ["起家","南家","西家","北家"]`（`src/routes/days.tsx`冒頭）で`seatIndex`0-3に対応させる。座席登録（`/days/:id/sessions/new`）・確認画面（`/days/:id/sessions/:sid/confirm`）のラベルと、半荘一覧の表の「風」列で使用（詳細は上のデザイン節を参照）
+- **座席登録後の遷移が変わった**: `POST /days/:id/sessions`（座席登録）は、以前は直接`/days/:id/sessions/:sid/capture`（撮影）へ遷移していたが、2026-09-16以降は新設の**対局中ページ**（`GET /days/:id/sessions/:sid`）へ遷移する。日別ページの半荘一覧でも、pending（撮影待ち）の半荘には「対局を記録する」ボタン（対局中ページへ）と、従来通り「点数表示機を撮影する」ボタン（直接capture画面へ、局メモを付けずに撮影だけしたい場合用）の両方を表示する
+- **対局中ページ（`GET /days/:id/sessions/:sid`）**: pendingの半荘専用のライブ入力画面。構成は「座席（起家〜北家と名前）」「これまでの局メモ一覧」「局メモを追加フォーム」の3ブロック
+  - **局の自動補完**: `ROUND_OPTIONS = ["東1局","東2局",...,"南4局"]`（8要素、`src/routes/days.tsx`冒頭）のセレクトで、これまで登録された局メモのうち`winType !== "chombo"`の件数（`advancingCount`）を次のインデックスとして自動選択する。チョンボは同じ局をやり直すことが多いため局を進めない扱いにしている。もちろんセレクトなので手動で別の局に変更もできる
+  - **親の自動算出**: 「風情報から自動算出してほしい」との要望どおり、選択中の局インデックス%4が親の`seatIndex`になる（東1局と南1局はどちらも起家が親、というように東場・南場で同じ並びが繰り返されるため）。クライアント側JS（`updateDealer()`）でセレクトのchangeイベントに合わせて即座に表示を更新する
+  - **結果の選択**: 「ロン・ツモ・流局・チョンボ」をラジオボタンで選択（`hand_logs.win_type`のenumに`chombo`を追加）。選択に応じて「和了者」（ロン・ツモ時のみ）と「対象」（ロン＝放銃者・チョンボ＝チョンボした対象者、それ以外は不要）の表示をJS（`updateResultFields()`）で切り替える。DB上は`loserPlayerId`カラムをロンの放銃者とチョンボの対象者の両方に使い回している（「UI上はどちらも『対象』と表現する」とスキーマにコメントで明記）
+  - **点数**: `hand_logs.points`（integer、2026-09-16のマイグレーション`drizzle/0006_orange_pyro.sql`で追加）にその局の点数（例: 3900、8000）を入力する。任意項目
+  - **役ボタン→モーダル**: 「役を選ぶ」ボタンを押すと`#yaku-modal`（`position:fixed`のオーバーレイ、`hidden`属性で開閉、`<dialog>`は使わずシンプルな`div`で実装）が開き、`src/lib/yaku.ts`の`YAKU_GROUPS`（1翻/2翻/3翻/5翻/6翻/役満）ごとにチェックボックスが並ぶ。「決定」を押すとチェックされた役名を「、」区切りで結合し、隠しinput（`yakuText`）とサマリー表示に反映してモーダルを閉じる。**鳴きで翻数が変わる役（三色同順・一気通貫・混全帯幺九・混一色・純全帯幺九・清一色）は「鳴きなし」「鳴きあり」を別項目として、それぞれ正しい翻数のグループに配置**している（例:「混一色（鳴きあり）」は2翻グループ、「混一色（鳴きなし）」は3翻グループ）。役牌は翻数を問わず「役牌」1項目のみ（多役牌の重ね取りは考慮しない）。まずは一般的な役のみを収録しており、必要に応じて`YAKU_GROUPS`に追加していく想定
+  - **南4局まで終了したら**: `advancingCount >= 8`になると「南4局まで終了しました」のカードが表示され、「点数表示機を撮影する」「撮影せずに手入力する」の2つのボタンで通常の撮影・確認フローに合流する
+  - 局メモ登録後のリダイレクト先は`POST /days/:id/sessions/:sid/hands`内でセッションの`status`を見て分岐する: pendingならこの対局中ページへ、confirmedなら（後から日別ページの折りたたみ欄で追加した場合）`/days/:id`へ
+- **日別ページの旧「局メモを追加」欄**: confirmed（確定済み）の半荘にのみ表示するよう変更（`s.status === "confirmed"`）。pendingの半荘は対局中ページに一本化したため、二重に入力欄を出さない。confirmedな半荘の局メモを後から追加・修正したい場合に使う（種別に「チョンボ」、点数欄も追加済み）
+- 対局中ページ・日別ページどちらの局メモ表示も、チョンボ（`チョンボ（対象者名）`）と点数（`○○点`）の表示に対応済み
 
 `/days`（対局日一覧・年ごとにグループ化する単独ページ）と`/stats/:year`は廃止し、`/years/:year`に統合した。年間の対局数が少ない（12試合程度）想定のため、日別の専用一覧ページは持たず年タブに内包している。
 

@@ -1,4 +1,4 @@
-import { eq, and, gte, lt, inArray, desc } from "drizzle-orm";
+import { eq, and, gte, lt, inArray, desc, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   players,
@@ -128,6 +128,20 @@ export async function computeTotals(db: Db, range: DateRange = {}): Promise<Play
       chipTotal: (rankChipTotals.get(p.id) ?? 0) + (yakumanTotals.get(p.id) ?? 0),
     }))
     .sort((a, b) => b.rawTotal - a.rawTotal);
+}
+
+/**
+ * そのプレイヤー1人分の、全期間の素点差分（ポイント）合計。個人ページの「通算」表示専用。
+ * 以前はここでも全プレイヤー・全期間を集計するcomputeTotalsを呼んで1人分だけ取り出しており、
+ * 個人ページを開くたびに履歴全体をスキャンしていた。SQL側のSUMで対象プレイヤーの行だけ集計する。
+ */
+export async function computePlayerRawTotal(db: Db, playerId: number): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`coalesce(sum(${sessionScores.rawScore}), 0)` })
+    .from(sessionScores)
+    .innerJoin(gameSessions, eq(sessionScores.gameSessionId, gameSessions.id))
+    .where(and(eq(sessionScores.playerId, playerId), eq(gameSessions.status, "confirmed")));
+  return row?.total ?? 0;
 }
 
 export function yearRange(year: number): DateRange {

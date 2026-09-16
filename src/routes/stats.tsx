@@ -17,6 +17,7 @@ import { isAdmin } from "../lib/auth";
 import {
   computeTotals,
   yearRange,
+  computePlayerRawTotal,
   computePlayerYearlyBreakdown,
   computeRankDistribution,
   computePlayerYakumanWins,
@@ -272,13 +273,12 @@ statsRoutes.get("/players/:id", async (c) => {
   const [player] = await db.select().from(players).where(eq(players.id, playerId));
   if (!player) return c.notFound();
 
-  const [overall, yearly, rankDist, yakumanWins] = await Promise.all([
-    computeTotals(db),
+  const [rawTotal, yearly, rankDist, yakumanWins] = await Promise.all([
+    computePlayerRawTotal(db, playerId),
     computePlayerYearlyBreakdown(db, playerId),
     computeRankDistribution(db, playerId),
     computePlayerYakumanWins(db, playerId),
   ]);
-  const mine = overall.find((t) => t.playerId === playerId);
   const gameCount = rankDist.reduce((sum, r) => sum + r.count, 0);
 
   // 日別集計は年で絞り込む（?yearクエリ省略時はこのプレイヤーの最新の対局年、それも無ければ今年）。
@@ -295,7 +295,7 @@ statsRoutes.get("/players/:id", async (c) => {
       <div class="card">
         <h2>通算</h2>
         <p>
-          ポイント合計: <Signed n={mine?.rawTotal ?? 0} /> ／ 半荘数: {gameCount}
+          ポイント合計: <Signed n={rawTotal} /> ／ 半荘数: {gameCount}
         </p>
       </div>
 

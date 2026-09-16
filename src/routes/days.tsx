@@ -1008,8 +1008,10 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
     .innerJoin(players, eq(dayParticipants.playerId, players.id))
     .where(eq(dayParticipants.dayId, dayId));
 
+  // imageData（写真BLOB本体）はこの画面では使わない（表示用リンクは/api/photos/:idが別途取得する）ので、
+  // 使うカラムだけ選択して毎回の無駄なBLOB読み込みを避ける。
   const [latestPhoto] = await db
-    .select()
+    .select({ id: photoUploads.id, ocrRawJson: photoUploads.ocrRawJson })
     .from(photoUploads)
     .where(eq(photoUploads.gameSessionId, sessionId))
     .orderBy(desc(photoUploads.id))

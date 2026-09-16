@@ -10,6 +10,7 @@ import {
   TotalsTable,
   TabBar,
   HistorySubTabs,
+  PlayerSubTabs,
   RankDistributionTable,
   YakumanHistoryList,
 } from "../views/components";
@@ -24,6 +25,7 @@ import {
   computePlayerDailyBreakdown,
   computeRankDistributionForAllPlayers,
   computeYakumanHistory,
+  computePlayerTraits,
 } from "../lib/aggregate";
 import { getOpenDayId } from "../lib/dayState";
 import { computeScoreTable, FIXED_TIERS, FU_CALC_TABLE } from "../lib/scoreTable";
@@ -269,20 +271,141 @@ statsRoutes.get("/scoretable", async (c) => {
 
 // ---------- 個人ページ ----------
 
+const fmtPercent = (n: number) => `${(n * 100).toFixed(1)}%`;
+const fmtDoraAvg = (n: number | null) => (n == null ? "-" : `${n.toFixed(2)}枚`);
+
 statsRoutes.get("/players/:id", async (c) => {
   const playerId = Number(c.req.param("id"));
   const db = getDb(c.env);
   const admin = await isAdmin(c);
+  const tab = c.req.query("tab") === "traits" ? "traits" : "results";
 
-  const [player] = await db.select().from(players).where(eq(players.id, playerId));
+  const [player, openDayId] = await Promise.all([
+    db.select().from(players).where(eq(players.id, playerId)).then((rows) => rows[0]),
+    admin ? getOpenDayId(db) : Promise.resolve(null),
+  ]);
   if (!player) return c.notFound();
 
-  const [rawTotal, yearly, rankDist, yakumanWins, openDayId] = await Promise.all([
+  if (tab === "traits") {
+    const traits = await computePlayerTraits(db, playerId);
+
+    return c.html(
+      <Layout title={`${player.name} の成績`} isAdmin={admin} openDayId={openDayId}>
+        <h1>{player.name} の成績</h1>
+        <PlayerSubTabs playerId={playerId} active="traits" />
+
+        {traits.handCount === 0 ? (
+          <div class="card">
+            <p>まだ局メモの記録がありません。</p>
+          </div>
+        ) : (
+          <>
+            <div class="card">
+              <h2>和了・進行（{traits.handCount}局中）</h2>
+              <table class="session-table">
+                <tbody>
+                  <tr>
+                    <td>上がり率</td>
+                    <td>
+                      {fmtPercent(traits.winRate)}（{traits.winCount}局）
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>振り込み率</td>
+                    <td>
+                      {fmtPercent(traits.dealInRate)}（{traits.dealInCount}局）
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>リーチ率</td>
+                    <td>
+                      {fmtPercent(traits.riichiRate)}（{traits.riichiCount}局）
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>鳴き率</td>
+                    <td>
+                      {fmtPercent(traits.nakiRate)}（{traits.nakiCount}局）
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>平均上がり点数</td>
+                    <td>{traits.avgWinPoints != null ? `${Math.round(traits.avgWinPoints).toLocaleString("ja-JP")}点` : "-"}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p style="font-size:0.8rem; color:var(--ink-soft); margin:8px 0 0">
+                リーチ・鳴き・平均上がり点数は局メモへの入力状況に精度が左右されます（未入力の局は「無かった」として扱われます）。平均上がり点数は本場・リーチ棒分を含まない、役由来の点数のみの平均です。
+              </p>
+            </div>
+
+            <div class="card">
+              <h2>ドラ平均（和了時）</h2>
+              <table class="session-table">
+                <tbody>
+                  <tr>
+                    <td>表ドラ平均</td>
+                    <td>{fmtDoraAvg(traits.avgOmoteDora)}</td>
+                  </tr>
+                  <tr>
+                    <td>裏ドラ平均</td>
+                    <td>{fmtDoraAvg(traits.avgUraDora)}</td>
+                  </tr>
+                  <tr>
+                    <td>赤ドラ平均</td>
+                    <td>{fmtDoraAvg(traits.avgAkaDora)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p style="font-size:0.8rem; color:var(--ink-soft); margin:8px 0 0">
+                ドラ枚数が入力された和了のみで平均しています（未入力の和了は分母に含めません）。
+              </p>
+            </div>
+
+            <div class="card">
+              <h2>得意役</h2>
+              {traits.favoriteYaku.length === 0 ? <p>まだ役の記録がありません。</p> : <p>{traits.favoriteYaku.join("、")}</p>}
+            </div>
+
+            <div class="card">
+              <h2>上がり役別比率</h2>
+              {traits.yakuBreakdown.length === 0 ? (
+                <p>まだ役の記録がありません。</p>
+              ) : (
+                <table class="session-table">
+                  <thead>
+                    <tr>
+                      <th>役</th>
+                      <th>回数</th>
+                      <th>比率</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {traits.yakuBreakdown.map((y) => (
+                      <tr>
+                        <td>{y.yaku}</td>
+                        <td>{y.count}回</td>
+                        <td>{fmtPercent(y.rate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <p style="font-size:0.8rem; color:var(--ink-soft); margin:8px 0 0">
+                比率は和了数（{traits.winCount}回）に対する割合です。役の入力が無い和了があると合計が100%未満になります。
+              </p>
+            </div>
+          </>
+        )}
+      </Layout>,
+    );
+  }
+
+  const [rawTotal, yearly, rankDist, yakumanWins] = await Promise.all([
     computePlayerRawTotal(db, playerId),
     computePlayerYearlyBreakdown(db, playerId),
     computeRankDistribution(db, playerId),
     computePlayerYakumanWins(db, playerId),
-    admin ? getOpenDayId(db) : Promise.resolve(null),
   ]);
   const gameCount = rankDist.reduce((sum, r) => sum + r.count, 0);
 
@@ -296,6 +419,7 @@ statsRoutes.get("/players/:id", async (c) => {
   return c.html(
     <Layout title={`${player.name} の成績`} isAdmin={admin} openDayId={openDayId}>
       <h1>{player.name} の成績</h1>
+      <PlayerSubTabs playerId={playerId} active="results" year={selectedYear} />
 
       <div class="card">
         <h2>通算</h2>

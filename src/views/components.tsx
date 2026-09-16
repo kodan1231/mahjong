@@ -135,6 +135,29 @@ export const HistorySubTabs = ({ active, year }: { active: "year" | "overall"; y
   );
 };
 
+/** 個人ページ内の結果（ポイント・着順等）/特性（上がり率・リーチ率等）の切り替え。 */
+export const PlayerSubTabs = ({
+  playerId,
+  active,
+  year,
+}: {
+  playerId: number;
+  active: "results" | "traits";
+  year?: number;
+}) => (
+  <nav class="tab-bar tab-bar-sub">
+    <a
+      href={`/players/${playerId}?tab=results${year != null ? `&year=${year}` : ""}`}
+      class={`tab${active === "results" ? " active" : ""}`}
+    >
+      結果
+    </a>
+    <a href={`/players/${playerId}?tab=traits`} class={`tab${active === "traits" ? " active" : ""}`}>
+      特性
+    </a>
+  </nav>
+);
+
 /**
  * 対局日単位のポイント合計を表す0起点の棒グラフ（追加ライブラリ不要、サーバー側でSVGを生成する）。
  * 1本＝1対局日のその日のポイント合計。プラスなら基準線から上に緑、マイナスなら下に赤の棒を伸ばす。

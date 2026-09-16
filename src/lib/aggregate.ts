@@ -8,6 +8,7 @@ import {
   sessionScores,
   yakumanEvents,
   yakumanEventTargets,
+  handLogs,
 } from "../db/schema";
 import { computeYakumanChips } from "./scoring";
 
@@ -476,4 +477,133 @@ export async function computePlayerDailyBreakdown(
       rawTotal: rawByDay.get(d.id) ?? 0,
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export interface YakuBreakdownEntry {
+  yaku: string;
+  count: number;
+  /** 和了数（winCount）に対する比率(0-1)。役の入力漏れがあると合計が1未満になりうる */
+  rate: number;
+}
+
+export interface PlayerTraits {
+  /** 参加局数（チョンボを除く）。各種比率の分母 */
+  handCount: number;
+  winCount: number;
+  winRate: number;
+  riichiCount: number;
+  riichiRate: number;
+  nakiCount: number;
+  nakiRate: number;
+  dealInCount: number;
+  dealInRate: number;
+  /** 平均上がり点数（役の点数のみ。本場・リーチ棒分は含まない）。点数未入力の和了は除いて平均する */
+  avgWinPoints: number | null;
+  yakuBreakdown: YakuBreakdownEntry[];
+  /** 出現数が最大の役（同数なら複数）。1件も役が記録されていなければ空配列 */
+  favoriteYaku: string[];
+  avgOmoteDora: number | null;
+  avgUraDora: number | null;
+  avgAkaDora: number | null;
+}
+
+function parsePlayerIdList(json: string | null): number[] {
+  if (!json) return [];
+  try {
+    const ids: unknown = JSON.parse(json);
+    return Array.isArray(ids) ? ids : [];
+  } catch {
+    return [];
+  }
+}
+
+function average(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return values.reduce((sum, v) => sum + v, 0) / values.length;
+}
+
+/**
+ * 個人ページ「特性」タブ用の各種指標（上がり率・リーチ率・鳴き率・振り込み率・平均上がり点数・
+ * 得意役・上がり役別比率・表/裏/赤ドラ平均数）。分母となる「参加局数」はこのプレイヤーが座席に
+ * 入っていた半荘のhand_logs件数（チョンボは同じ局のやり直し扱いのため除く）。
+ * リーチ・鳴き・ドラ・役はいずれも任意入力項目のため、入力されていない局は「無かった」として
+ * 分母に含めたまま扱う（＝運用初期は入力漏れの分だけ控えめな数字になりうる）。
+ */
+export async function computePlayerTraits(db: Db, playerId: number): Promise<PlayerTraits> {
+  const empty: PlayerTraits = {
+    handCount: 0,
+    winCount: 0,
+    winRate: 0,
+    riichiCount: 0,
+    riichiRate: 0,
+    nakiCount: 0,
+    nakiRate: 0,
+    dealInCount: 0,
+    dealInRate: 0,
+    avgWinPoints: null,
+    yakuBreakdown: [],
+    favoriteYaku: [],
+    avgOmoteDora: null,
+    avgUraDora: null,
+    avgAkaDora: null,
+  };
+
+  const seatedSessions = await db
+    .select({ gameSessionId: sessionScores.gameSessionId })
+    .from(sessionScores)
+    .where(eq(sessionScores.playerId, playerId));
+  const sessionIds = [...new Set(seatedSessions.map((s) => s.gameSessionId))];
+  if (sessionIds.length === 0) return empty;
+
+  const handRows = await db.select().from(handLogs).where(inArray(handLogs.gameSessionId, sessionIds));
+  // チョンボは同じ局をやり直す扱いなので、参加局数・各種比率の対象から除く。
+  const countedHands = handRows.filter((h) => h.winType !== "chombo");
+  const handCount = countedHands.length;
+
+  const winHands = countedHands.filter(
+    (h) => h.winnerPlayerId === playerId && (h.winType === "ron" || h.winType === "tsumo"),
+  );
+  const winCount = winHands.length;
+
+  const riichiCount = countedHands.filter((h) => parsePlayerIdList(h.riichiPlayerIds).includes(playerId)).length;
+  const nakiCount = countedHands.filter((h) => parsePlayerIdList(h.nakiPlayerIds).includes(playerId)).length;
+  const dealInCount = countedHands.filter((h) => h.winType === "ron" && h.loserPlayerId === playerId).length;
+
+  const avgWinPoints = average(winHands.filter((h) => h.points != null).map((h) => h.points!));
+  const avgOmoteDora = average(winHands.filter((h) => h.omoteDoraCount != null).map((h) => h.omoteDoraCount!));
+  const avgUraDora = average(winHands.filter((h) => h.uraDoraCount != null).map((h) => h.uraDoraCount!));
+  const avgAkaDora = average(winHands.filter((h) => h.akaDoraCount != null).map((h) => h.akaDoraCount!));
+
+  const yakuCounts = new Map<string, number>();
+  for (const h of winHands) {
+    if (!h.yakuText) continue;
+    for (const name of h.yakuText.split("、")) {
+      const trimmed = name.trim();
+      if (!trimmed) continue;
+      yakuCounts.set(trimmed, (yakuCounts.get(trimmed) ?? 0) + 1);
+    }
+  }
+  const yakuBreakdown: YakuBreakdownEntry[] = [...yakuCounts.entries()]
+    .map(([yaku, count]) => ({ yaku, count, rate: winCount > 0 ? count / winCount : 0 }))
+    .sort((a, b) => b.count - a.count);
+  const maxYakuCount = yakuBreakdown.length > 0 ? yakuBreakdown[0]!.count : 0;
+  const favoriteYaku = yakuBreakdown.filter((y) => y.count === maxYakuCount).map((y) => y.yaku);
+
+  return {
+    handCount,
+    winCount,
+    winRate: handCount > 0 ? winCount / handCount : 0,
+    riichiCount,
+    riichiRate: handCount > 0 ? riichiCount / handCount : 0,
+    nakiCount,
+    nakiRate: handCount > 0 ? nakiCount / handCount : 0,
+    dealInCount,
+    dealInRate: handCount > 0 ? dealInCount / handCount : 0,
+    avgWinPoints,
+    yakuBreakdown,
+    favoriteYaku,
+    avgOmoteDora,
+    avgUraDora,
+    avgAkaDora,
+  };
 }

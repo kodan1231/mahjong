@@ -898,6 +898,9 @@ dayRoutes.get("/days/:id/sessions/new", requireAdmin, async (c) => {
 
   return c.html(
     <Layout title="半荘を登録" isAdmin={true} openDayId={openDayId}>
+      <p>
+        <a href={`/days/${dayId}`}>← 対局日の詳細に戻る</a>
+      </p>
       <h1>第{nextSeq}半荘: 座席を登録</h1>
       <p>起家から順にプレイヤーを選んでください。</p>
       <div class="card">

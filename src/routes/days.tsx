@@ -26,7 +26,7 @@ import {
   type DisplayMode,
   type LiveHandEntry,
 } from "../lib/scoring";
-import { computeDaySummary } from "../lib/aggregate";
+import { summarizeDayTotals } from "../lib/aggregate";
 import { YAKU_GROUPS } from "../lib/yaku";
 
 export const dayRoutes = new Hono<{ Bindings: Env }>();
@@ -288,6 +288,7 @@ async function loadDayDetail(db: Db, dayId: number) {
       id: yakumanEvents.id,
       yakuName: yakumanEvents.yakuName,
       chipPerLoser: yakumanEvents.chipPerLoser,
+      winnerPlayerId: yakumanEvents.winnerPlayerId,
       winnerName: players.name,
     })
     .from(yakumanEvents)
@@ -297,13 +298,25 @@ async function loadDayDetail(db: Db, dayId: number) {
   const eventIds = events.map((e) => e.id);
   const allTargets = eventIds.length
     ? await db
-        .select({ yakumanEventId: yakumanEventTargets.yakumanEventId, name: players.name })
+        .select({
+          yakumanEventId: yakumanEventTargets.yakumanEventId,
+          playerId: yakumanEventTargets.playerId,
+          name: players.name,
+        })
         .from(yakumanEventTargets)
         .innerJoin(players, eq(yakumanEventTargets.playerId, players.id))
         .where(inArray(yakumanEventTargets.yakumanEventId, eventIds))
     : [];
 
-  const daySummary = await computeDaySummary(db, dayId);
+  // 上で取得済みのparticipants/sessions/allScores/events/allTargetsから直接計算する
+  // （以前はcomputeDaySummaryが同じデータをDBから再取得しており、D1往復が余分に3〜4回発生していた）。
+  const daySummary = summarizeDayTotals({
+    participants,
+    confirmedGameSessionIds: sessions.filter((s) => s.status === "confirmed").map((s) => s.id),
+    scores: allScores,
+    yakumanEvents: events,
+    yakumanTargets: allTargets,
+  });
 
   return { day, participants, sessions, allScores, allHands, events, allTargets, daySummary };
 }

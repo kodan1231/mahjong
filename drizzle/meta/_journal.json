@@ -57,6 +57,13 @@
       "when": 1789440112880,
       "tag": "0007_funny_hedge_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789517878858,
+      "tag": "0008_add_performance_indexes",
+      "breakpoints": true
     }
   ]
 }

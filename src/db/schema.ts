@@ -121,9 +121,20 @@ export const handLogs = sqliteTable(
     // ロン時は放銃者、チョンボ時はチョンボした対象プレイヤーを指す（UI上はどちらも「対象」と表現する）
     loserPlayerId: integer("loser_player_id").references(() => players.id),
     yakuText: text("yaku_text"),
-    points: integer("points"), // その局の点数（例: 3900, 8000など。任意）
+    // その局の点数（例: 3900, 8000など。任意）。上がった役由来の点数のみを入力する想定で、
+    // 本場・リーチ棒分はここに含めない（現在のスコア計算側でhonba・riichiPlayerIdsから自動加算する）。
+    points: integer("points"),
     // 流局時のテンパイ者（playerIdの配列をJSON文字列として保存。例: "[1,3]"）。任意
     tenpaiPlayerIds: text("tenpai_player_ids"),
+    // この局でリーチした人（playerIdの配列をJSON文字列。例: "[1,3]"）。任意。
+    // 和了・流局など結果に関わらず記録する（リーチ率は和了時だけでは正しく集計できないため）
+    riichiPlayerIds: text("riichi_player_ids"),
+    // この局で鳴き（チー・ポン・カン）をした人（playerIdの配列をJSON文字列）。任意
+    nakiPlayerIds: text("naki_player_ids"),
+    // 上がった時のドラ枚数（任意、将来の個人成績「表/裏/赤ドラ平均数」用）。それぞれ独立して入力する
+    omoteDoraCount: integer("omote_dora_count"),
+    uraDoraCount: integer("ura_dora_count"),
+    akaDoraCount: integer("aka_dora_count"),
     createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
   },
   (t) => ({

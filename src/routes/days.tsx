@@ -50,7 +50,15 @@ const ROUND_OPTIONS = ["東1局", "東2局", "東3局", "東4局", "南1局", "�
 // 求める座席インデックス基準の形に変換してから渡す。座標変換とラベル解決はこの画面固有の
 // 関心事なのでroutes側に置き、純粋な点数計算ロジックだけをlib側に切り出してテスト可能にしている。
 function resolveLiveHandEntries(
-  hands: { winType: string; winnerPlayerId: number | null; loserPlayerId: number | null; points: number | null; roundLabel: string | null }[],
+  hands: {
+    winType: string;
+    winnerPlayerId: number | null;
+    loserPlayerId: number | null;
+    points: number | null;
+    roundLabel: string | null;
+    honba: number;
+    riichiPlayerIds: string | null;
+  }[],
   seatPlayerIds: (number | null)[],
 ): LiveHandEntry[] {
   const seatOfPlayer = new Map<number, number>();
@@ -60,12 +68,23 @@ function resolveLiveHandEntries(
 
   return hands.map((h) => {
     const roundIndex = h.roundLabel ? ROUND_OPTIONS.indexOf(h.roundLabel as (typeof ROUND_OPTIONS)[number]) : -1;
+    let riichiSeats: number[] = [];
+    if (h.riichiPlayerIds) {
+      try {
+        const ids: number[] = JSON.parse(h.riichiPlayerIds);
+        riichiSeats = ids.map((id) => seatOfPlayer.get(id)).filter((s): s is number => s != null);
+      } catch {
+        // ignore parse errors, treat as no riichi info
+      }
+    }
     return {
       winType: h.winType,
       winnerSeat: h.winnerPlayerId != null ? (seatOfPlayer.get(h.winnerPlayerId) ?? null) : null,
       loserSeat: h.loserPlayerId != null ? (seatOfPlayer.get(h.loserPlayerId) ?? null) : null,
       dealerSeat: roundIndex >= 0 ? roundIndex % 4 : null,
       points: h.points,
+      honba: h.honba,
+      riichiSeats,
     };
   });
 }
@@ -111,6 +130,42 @@ function resolveRoundProgressEntries(
     });
   }
   return entries;
+}
+
+// 局メモ一覧表示用: リーチ・鳴き・ドラ枚数を「（リーチ: ○○／鳴き: ○○／ドラ表1・裏1）」のような
+// 一つの括弧書きにまとめる。日別ページ・対局中ページの両方の局メモ表示から共通で使う。
+function describeHandExtras(
+  h: {
+    riichiPlayerIds: string | null;
+    nakiPlayerIds: string | null;
+    omoteDoraCount: number | null;
+    uraDoraCount: number | null;
+    akaDoraCount: number | null;
+  },
+  nameOf: (playerId: number) => string,
+): string {
+  const parts: string[] = [];
+
+  for (const [field, label] of [
+    [h.riichiPlayerIds, "リーチ"],
+    [h.nakiPlayerIds, "鳴き"],
+  ] as const) {
+    if (!field) continue;
+    try {
+      const ids: number[] = JSON.parse(field);
+      if (ids.length > 0) parts.push(`${label}: ${ids.map(nameOf).join("、")}`);
+    } catch {
+      // ignore parse errors
+    }
+  }
+
+  const doraParts: string[] = [];
+  if (h.omoteDoraCount) doraParts.push(`表${h.omoteDoraCount}`);
+  if (h.uraDoraCount) doraParts.push(`裏${h.uraDoraCount}`);
+  if (h.akaDoraCount) doraParts.push(`赤${h.akaDoraCount}`);
+  if (doraParts.length > 0) parts.push(`ドラ${doraParts.join("・")}`);
+
+  return parts.length > 0 ? `（${parts.join("／")}）` : "";
 }
 
 // 局メモ入力フォーム（局の自動補完＋親の自動算出、結果に応じた和了者/対象/テンパイ欄の出し分け、
@@ -222,8 +277,41 @@ function HandLogForm({
           </div>
         </div>
 
-        <label for={`points-input-${uid}`}>点数（任意）</label>
+        <label>リーチした人（任意）</label>
+        <div class="choice-group">
+          {seatPlayers.map((p) => (
+            <label class="choice-btn">
+              <input type="checkbox" name="riichiPlayerIds" value={p.playerId} /> {p.name}
+            </label>
+          ))}
+        </div>
+
+        <label>鳴いた人（任意）</label>
+        <div class="choice-group">
+          {seatPlayers.map((p) => (
+            <label class="choice-btn">
+              <input type="checkbox" name="nakiPlayerIds" value={p.playerId} /> {p.name}
+            </label>
+          ))}
+        </div>
+
+        <label for={`points-input-${uid}`}>点数（任意・役の点数のみ。本場・リーチ棒分は自動計算されます）</label>
         <input type="number" step="100" name="points" id={`points-input-${uid}`} />
+
+        <div id={`dora-field-${uid}`}>
+          <label>ドラ（任意）</label>
+          <div style="display:flex; gap:12px; flex-wrap:wrap">
+            <label style="font-weight:normal; display:flex; align-items:center; gap:4px">
+              表<input type="number" name="omoteDoraCount" min="0" step="1" style="width:4em" />枚
+            </label>
+            <label style="font-weight:normal; display:flex; align-items:center; gap:4px">
+              裏<input type="number" name="uraDoraCount" min="0" step="1" style="width:4em" />枚
+            </label>
+            <label style="font-weight:normal; display:flex; align-items:center; gap:4px">
+              赤<input type="number" name="akaDoraCount" min="0" step="1" style="width:4em" />枚
+            </label>
+          </div>
+        </div>
 
         <label>役（任意）</label>
         <p>
@@ -280,12 +368,14 @@ function HandLogForm({
               const winnerField = document.getElementById('winner-field-' + uid);
               const targetField = document.getElementById('target-field-' + uid);
               const tenpaiField = document.getElementById('tenpai-field-' + uid);
+              const doraField = document.getElementById('dora-field-' + uid);
               function updateResultFields() {
                 const checked = document.querySelector('#result-group-' + uid + ' input[name=winType]:checked');
                 const val = checked ? checked.value : 'ron';
                 winnerField.hidden = !(val === 'ron' || val === 'tsumo');
                 targetField.hidden = !(val === 'ron' || val === 'chombo');
                 tenpaiField.hidden = val !== 'draw';
+                doraField.hidden = !(val === 'ron' || val === 'tsumo');
               }
               document.querySelectorAll('#result-group-' + uid + ' input[name=winType]').forEach((el) => {
                 el.addEventListener('change', updateResultFields);
@@ -494,6 +584,7 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
                         }からロン`}
                       {h.points ? ` ${h.points}点` : ""}
                       {h.yakuText ? `（${h.yakuText}）` : ""}
+                      {describeHandExtras(h, (id) => rows.find((r) => r.playerId === id)?.name ?? "?")}
                       {admin && (
                         <form class="inline-form" method="post" action={`/days/${dayId}/hands/${h.id}/delete`}>
                           <button class="link-button" type="submit">
@@ -952,6 +1043,7 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
                   {h.winType === "ron" && `${winnerName}が${targetName}からロン`}
                   {h.points ? ` ${h.points}点` : ""}
                   {h.yakuText ? `（${h.yakuText}）` : ""}
+                  {describeHandExtras(h, (id) => nameByPlayerId.get(id) ?? "?")}
                   <form class="inline-form" method="post" action={`/days/${dayId}/hands/${h.id}/delete`}>
                     <button class="link-button" type="submit">
                       [削除]
@@ -1321,6 +1413,16 @@ dayRoutes.post("/days/:id/sessions/:sid/hands", requireAdmin, async (c) => {
   const tenpaiRaw = body.tenpaiPlayerIds;
   const tenpaiPlayerIds = Array.isArray(tenpaiRaw) ? tenpaiRaw : tenpaiRaw ? [tenpaiRaw] : [];
 
+  // リーチ・鳴きは結果に関わらず（勝敗を問わず）記録する。
+  const riichiRaw = body.riichiPlayerIds;
+  const riichiPlayerIds = Array.isArray(riichiRaw) ? riichiRaw : riichiRaw ? [riichiRaw] : [];
+  const nakiRaw = body.nakiPlayerIds;
+  const nakiPlayerIds = Array.isArray(nakiRaw) ? nakiRaw : nakiRaw ? [nakiRaw] : [];
+
+  const omoteDoraCount = body.omoteDoraCount ? Number(body.omoteDoraCount) : null;
+  const uraDoraCount = body.uraDoraCount ? Number(body.uraDoraCount) : null;
+  const akaDoraCount = body.akaDoraCount ? Number(body.akaDoraCount) : null;
+
   await db.insert(handLogs).values({
     gameSessionId: sessionId,
     winType,
@@ -1332,6 +1434,11 @@ dayRoutes.post("/days/:id/sessions/:sid/hands", requireAdmin, async (c) => {
     yakuText,
     points: Number.isFinite(points) ? points : null,
     tenpaiPlayerIds: winType === "draw" && tenpaiPlayerIds.length > 0 ? JSON.stringify(tenpaiPlayerIds.map(Number)) : null,
+    riichiPlayerIds: riichiPlayerIds.length > 0 ? JSON.stringify(riichiPlayerIds.map(Number)) : null,
+    nakiPlayerIds: nakiPlayerIds.length > 0 ? JSON.stringify(nakiPlayerIds.map(Number)) : null,
+    omoteDoraCount: winType === "ron" || winType === "tsumo" ? (Number.isFinite(omoteDoraCount) ? omoteDoraCount : null) : null,
+    uraDoraCount: winType === "ron" || winType === "tsumo" ? (Number.isFinite(uraDoraCount) ? uraDoraCount : null) : null,
+    akaDoraCount: winType === "ron" || winType === "tsumo" ? (Number.isFinite(akaDoraCount) ? akaDoraCount : null) : null,
   });
 
   const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));

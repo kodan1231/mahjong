@@ -97,38 +97,66 @@ export interface LiveHandEntry {
   loserSeat: number | null;
   /** その局の親の座席(0-3)。ツモの配分計算に使う。ronでは無視される */
   dealerSeat: number | null;
-  /** その局の点数（ロンは授受額そのまま、ツモは和了者が受け取る合計） */
+  /** その局の点数。上がった役由来の点数のみ（本場・リーチ棒分は含まない。自動加算するため） */
   points: number | null;
+  /** この局の本場。ロンは+300×本場を対象が全額負担、ツモは+100×本場を3人均等負担で自動加算する */
+  honba: number;
+  /** この局でリーチした人の座席一覧。宣言した時点で即座に-1000し、場のリーチ棒として積み立てる */
+  riichiSeats: number[];
 }
 
 /**
  * 対局中ページの「現在のスコア」（この半荘の中だけの暫定合計）を、ここまでの局メモから算出する。
  * 正式なスコアは撮影・確認画面で別途確定するため、これはあくまで対局中の目安表示。
- * - ロン: 和了者+points、対象(放銃者)-pointsのシンプルな授受
- * - ツモ: pointsには和了者が受け取る合計を入力してもらう前提で、親かどうかに応じた比率
- *   （親のツモは3人が均等払い、子のツモは親が半分・残り2人が1/4ずつ）で各家の支払い額を求める
- * - 流局・チョンボ: このスコアには反映しない（正式なノーテン罰符等は確認画面側で扱う）
+ * - リーチ棒: 宣言した時点で結果に関わらず-1000し、場に積み立てる（供託）。和了（ロン・ツモ）が
+ *   出たら場の積み立てを丸ごと和了者が回収する（pointsの有無に関わらず回収は行う）。流局・チョンボでは
+ *   積み立ては場に残ったまま次の局に持ち越す。
+ * - 本場: ロンは対象(放銃者)が+300×本場を全額負担、ツモは3人が+100×本場ずつ均等負担する
+ *   （ツモの本場分は親子の配分比とは無関係に常に均等）。pointsが無い（役の点数を未入力の）局では
+ *   本場分も含めて加算しない。
+ * - ロン: 和了者+ (points+本場分)、対象(放銃者)- (points+本場分) のシンプルな授受
+ * - ツモ: pointsには和了者が受け取る「役由来の合計」を入力してもらう前提で、親かどうかに応じた比率
+ *   （親のツモは3人が均等払い、子のツモは親が半分・残り2人が1/4ずつ）で各家の支払い額を求め、
+ *   本場分（3人均等）を上乗せする
+ * - 流局: 素点の授受は無いが、リーチ供託だけは反映する
+ * - チョンボ: 同じ局をやり直す扱いのため、リーチ供託も含めこのスコアには一切反映しない
  */
 export function computeLiveScores(hands: LiveHandEntry[]): number[] {
   const scores = [0, 0, 0, 0];
+  let stickPool = 0; // 場に出ている未回収のリーチ棒の本数（1本=1000点）
 
   for (const h of hands) {
+    if (h.winType === "chombo") continue;
+
+    for (const seat of h.riichiSeats) {
+      scores[seat]! -= 1000;
+      stickPool += 1;
+    }
+
+    const isWin = (h.winType === "ron" || h.winType === "tsumo") && h.winnerSeat != null;
+    if (isWin) {
+      scores[h.winnerSeat!]! += stickPool * 1000;
+      stickPool = 0;
+    }
+
     if (h.points == null) continue;
+    const honbaBonus = 300 * h.honba;
 
     if (h.winType === "ron" && h.winnerSeat != null && h.loserSeat != null) {
-      scores[h.winnerSeat]! += h.points;
-      scores[h.loserSeat]! -= h.points;
+      scores[h.winnerSeat]! += h.points + honbaBonus;
+      scores[h.loserSeat]! -= h.points + honbaBonus;
     } else if (h.winType === "tsumo" && h.winnerSeat != null) {
       const dealerSeat = h.dealerSeat ?? 0;
-      scores[h.winnerSeat]! += h.points;
+      const honbaShare = 100 * h.honba;
+      scores[h.winnerSeat]! += h.points + honbaBonus;
       for (let seat = 0; seat < 4; seat++) {
         if (seat === h.winnerSeat) continue;
         if (h.winnerSeat === dealerSeat) {
-          scores[seat]! -= h.points / 3;
+          scores[seat]! -= h.points / 3 + honbaShare;
         } else if (seat === dealerSeat) {
-          scores[seat]! -= h.points / 2;
+          scores[seat]! -= h.points / 2 + honbaShare;
         } else {
-          scores[seat]! -= h.points / 4;
+          scores[seat]! -= h.points / 4 + honbaShare;
         }
       }
     }

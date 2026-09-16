@@ -5,15 +5,16 @@ import { getDb } from "../db/client";
 import { players } from "../db/schema";
 import { Layout } from "../views/layout";
 import { requireAdmin } from "../lib/auth";
+import { getOpenDayId } from "../lib/dayState";
 
 export const playerRoutes = new Hono<{ Bindings: Env }>();
 
 playerRoutes.get("/players", requireAdmin, async (c) => {
   const db = getDb(c.env);
-  const all = await db.select().from(players).orderBy(players.id);
+  const [all, openDayId] = await Promise.all([db.select().from(players).orderBy(players.id), getOpenDayId(db)]);
 
   return c.html(
-    <Layout title="プレイヤー管理" isAdmin={true}>
+    <Layout title="プレイヤー管理" isAdmin={true} openDayId={openDayId}>
       <h1>プレイヤー管理</h1>
       <div class="card">
         <table>

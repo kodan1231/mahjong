@@ -23,10 +23,14 @@ import {
   ORIGIN_SCORE,
   HAKOWARE_AUTO_THRESHOLD,
   computeLiveScores,
+  computeNextRoundState,
+  isDealerContinuing,
   type DisplayMode,
   type LiveHandEntry,
+  type RoundProgressEntry,
 } from "../lib/scoring";
 import { summarizeDayTotals } from "../lib/aggregate";
+import { getOpenDayId } from "../lib/dayState";
 import { YAKU_GROUPS } from "../lib/yaku";
 
 export const dayRoutes = new Hono<{ Bindings: Env }>();
@@ -66,6 +70,49 @@ function resolveLiveHandEntries(
   });
 }
 
+// hand_logsの生データを、computeNextRoundState（src/lib/scoring.ts）が求める座席インデックス基準の
+// 形に変換する（resolveLiveHandEntriesの本場・次局提案版）。roundLabelがROUND_OPTIONSと一致しない
+// 行（通常は発生しない）は判定対象から除外する。
+function resolveRoundProgressEntries(
+  hands: {
+    winType: string;
+    roundLabel: string | null;
+    honba: number;
+    winnerPlayerId: number | null;
+    tenpaiPlayerIds: string | null;
+  }[],
+  seatPlayerIds: (number | null)[],
+): RoundProgressEntry[] {
+  const seatOfPlayer = new Map<number, number>();
+  seatPlayerIds.forEach((pid, seat) => {
+    if (pid != null) seatOfPlayer.set(pid, seat);
+  });
+
+  const entries: RoundProgressEntry[] = [];
+  for (const h of hands) {
+    const roundIndex = h.roundLabel ? ROUND_OPTIONS.indexOf(h.roundLabel as (typeof ROUND_OPTIONS)[number]) : -1;
+    if (roundIndex < 0) continue;
+    let tenpaiSeats: number[] = [];
+    if (h.tenpaiPlayerIds) {
+      try {
+        const ids: number[] = JSON.parse(h.tenpaiPlayerIds);
+        tenpaiSeats = ids.map((id) => seatOfPlayer.get(id)).filter((s): s is number => s != null);
+      } catch {
+        // ignore parse errors, treat as no tenpai info
+      }
+    }
+    entries.push({
+      winType: h.winType,
+      roundIndex,
+      honba: h.honba,
+      dealerSeat: roundIndex % 4,
+      winnerSeat: h.winnerPlayerId != null ? (seatOfPlayer.get(h.winnerPlayerId) ?? null) : null,
+      tenpaiSeats,
+    });
+  }
+  return entries;
+}
+
 // 局メモ入力フォーム（局の自動補完＋親の自動算出、結果に応じた和了者/対象/テンパイ欄の出し分け、
 // 役選択モーダル）。対局中ページと、対局日詳細の確定済み半荘の「局メモを追加・修正」の両方で使う共通部品。
 // 1ページに複数半荘分（＝複数インスタンス）表示されうるため、DOM idはすべてsessionIdで一意にしている。
@@ -79,25 +126,49 @@ function HandLogForm({
   dayId: number;
   sessionId: number;
   nameBySeat: string[];
-  seatPlayers: { playerId: number; name: string }[];
-  hands: { winType: string }[];
+  seatPlayers: { playerId: number; seatIndex: number; name: string }[];
+  hands: {
+    winType: string;
+    roundLabel: string | null;
+    honba: number;
+    winnerPlayerId: number | null;
+    tenpaiPlayerIds: string | null;
+  }[];
 }) {
   const uid = String(sessionId);
-  // チョンボは局を進めない扱いにする（同じ局をやり直すことが多いため）。
-  const advancingCount = hands.filter((h) => h.winType !== "chombo").length;
-  const nextRoundIndex = Math.min(advancingCount, ROUND_OPTIONS.length - 1);
+  const seatPlayerIds = [0, 1, 2, 3].map((i) => seatPlayers.find((p) => p.seatIndex === i)?.playerId ?? null);
+  // 親が和了、または流局で親がテンパイのときは同じ局のまま本場+1、それ以外は次の局に進み本場0に戻る
+  // （チョンボはやり直し扱いなので判定対象から除外。computeNextRoundStateが担う）。
+  // あくまでフォームの初期値の提案であり、両方とも保存前に手で修正できる。
+  const { roundIndex: nextRoundIndex, honba: nextHonba } = computeNextRoundState(
+    resolveRoundProgressEntries(hands, seatPlayerIds),
+    ROUND_OPTIONS.length - 1,
+  );
 
   return (
     <>
       <form class="stack" method="post" action={`/days/${dayId}/sessions/${sessionId}/hands`}>
         <label for={`round-select-${uid}`}>局</label>
-        <select name="roundLabel" id={`round-select-${uid}`}>
-          {ROUND_OPTIONS.map((label, i) => (
-            <option value={label} selected={i === nextRoundIndex}>
-              {label}
-            </option>
-          ))}
-        </select>
+        <div style="display:flex; gap:8px; align-items:center">
+          <select name="roundLabel" id={`round-select-${uid}`} style="flex:1">
+            {ROUND_OPTIONS.map((label, i) => (
+              <option value={label} selected={i === nextRoundIndex}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            name="honba"
+            id={`honba-input-${uid}`}
+            min="0"
+            step="1"
+            value={nextHonba}
+            style="width:5em"
+            aria-label="本場"
+          />
+          <span>本場</span>
+        </div>
         <p style="margin:0">
           親: <strong id={`dealer-name-${uid}`}>{nameBySeat[nextRoundIndex % 4]}</strong>
         </p>
@@ -407,7 +478,7 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
                 <ul>
                   {hands.map((h) => (
                     <li>
-                      {h.roundLabel ? `${h.roundLabel}: ` : ""}
+                      {h.roundLabel ? `${h.roundLabel}${h.honba ? ` ${h.honba}本場` : ""}: ` : ""}
                       {(() => {
                         if (h.winType !== "draw") return null;
                         const tenpaiIds: number[] = h.tenpaiPlayerIds ? JSON.parse(h.tenpaiPlayerIds) : [];
@@ -557,7 +628,7 @@ dayRoutes.get("/", async (c) => {
 
   if (!targetDay) {
     return c.html(
-      <Layout title="直近の成績" isAdmin={admin}>
+      <Layout title="直近の成績" isAdmin={admin} openDayId={openDay?.id ?? null}>
         <TabBar active="today" />
         <h1>直近の成績</h1>
         <div class="card">
@@ -578,7 +649,7 @@ dayRoutes.get("/", async (c) => {
   if (!data) return c.notFound();
 
   return c.html(
-    <Layout title="直近の成績" isAdmin={admin}>
+    <Layout title="直近の成績" isAdmin={admin} openDayId={openDay?.id ?? null}>
       <TabBar active="today" />
       <h1>
         直近の成績{" "}
@@ -603,7 +674,7 @@ dayRoutes.get("/days/new", requireAdmin, async (c) => {
   const today = new Date().toISOString().slice(0, 10);
 
   return c.html(
-    <Layout title="対局日を開始・登録" isAdmin={true}>
+    <Layout title="対局日を開始・登録" isAdmin={true} openDayId={openDay?.id ?? null}>
       <h1>対局日を開始・登録</h1>
       {openDay && (
         <p class="warning">
@@ -694,13 +765,13 @@ dayRoutes.get("/days/:id", async (c) => {
   const db = getDb(c.env);
   const admin = await isAdmin(c);
 
-  const data = await loadDayDetail(db, dayId);
+  const [data, openDayId] = await Promise.all([loadDayDetail(db, dayId), admin ? getOpenDayId(db) : Promise.resolve(null)]);
   if (!data) return c.notFound();
 
   const year = Number(data.day.date.slice(0, 4));
 
   return c.html(
-    <Layout title={`${data.day.date} の対局`} isAdmin={admin}>
+    <Layout title={`${data.day.date} の対局`} isAdmin={admin} openDayId={openDayId}>
       <p>
         <a href={`/years/${year}`}>← {year}年の一覧に戻る</a>
       </p>
@@ -728,11 +799,14 @@ dayRoutes.get("/days/:id/sessions/new", requireAdmin, async (c) => {
     .innerJoin(players, eq(dayParticipants.playerId, players.id))
     .where(eq(dayParticipants.dayId, dayId));
 
-  const existingSessions = await db.select().from(gameSessions).where(eq(gameSessions.dayId, dayId));
+  const [existingSessions, openDayId] = await Promise.all([
+    db.select().from(gameSessions).where(eq(gameSessions.dayId, dayId)),
+    getOpenDayId(db),
+  ]);
   const nextSeq = existingSessions.length + 1;
 
   return c.html(
-    <Layout title="半荘を登録" isAdmin={true}>
+    <Layout title="半荘を登録" isAdmin={true} openDayId={openDayId}>
       <h1>第{nextSeq}半荘: 座席を登録</h1>
       <p>起家から順にプレイヤーを選んでください。</p>
       <div class="card">
@@ -801,32 +875,37 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
   const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));
   if (!session) return c.notFound();
 
-  const seatRows = await db
-    .select({ seatIndex: sessionScores.seatIndex, playerId: sessionScores.playerId, name: players.name })
-    .from(sessionScores)
-    .innerJoin(players, eq(sessionScores.playerId, players.id))
-    .where(eq(sessionScores.gameSessionId, sessionId))
-    .orderBy(asc(sessionScores.seatIndex));
-
-  const hands = await db
-    .select()
-    .from(handLogs)
-    .where(eq(handLogs.gameSessionId, sessionId))
-    .orderBy(asc(handLogs.id));
+  const [seatRows, hands, openDayId] = await Promise.all([
+    db
+      .select({ seatIndex: sessionScores.seatIndex, playerId: sessionScores.playerId, name: players.name })
+      .from(sessionScores)
+      .innerJoin(players, eq(sessionScores.playerId, players.id))
+      .where(eq(sessionScores.gameSessionId, sessionId))
+      .orderBy(asc(sessionScores.seatIndex)),
+    db.select().from(handLogs).where(eq(handLogs.gameSessionId, sessionId)).orderBy(asc(handLogs.id)),
+    getOpenDayId(db),
+  ]);
 
   const nameBySeat = [0, 1, 2, 3].map((i) => seatRows.find((s) => s.seatIndex === i)?.name ?? "?");
   const nameByPlayerId = new Map(seatRows.map((s) => [s.playerId, s.name]));
 
-  // チョンボは局を進めない扱いにする（同じ局をやり直すことが多いため）。南4局まで終わったかの判定にのみ使う
-  // （次に入力する局・親の算出はHandLogForm内で行う）。
-  const advancingCount = hands.filter((h) => h.winType !== "chombo").length;
-  const isDone = advancingCount >= ROUND_OPTIONS.length;
-  const currentDealerSeat = Math.min(advancingCount, ROUND_OPTIONS.length - 1) % 4;
   const seatPlayerIds = [0, 1, 2, 3].map((i) => seatRows.find((s) => s.seatIndex === i)?.playerId ?? null);
   const liveScores = computeLiveScores(resolveLiveHandEntries(hands, seatPlayerIds));
 
+  // 親の連荘（本場+1で同じ局が続く）を考慮した「次の局」の親を現在の親として表示する
+  // （次に入力する局・本場自体の算出はHandLogForm内で行う）。
+  const roundProgress = resolveRoundProgressEntries(hands, seatPlayerIds);
+  const nextRoundState = computeNextRoundState(roundProgress, ROUND_OPTIONS.length - 1);
+  const currentDealerSeat = nextRoundState.roundIndex % 4;
+  // 南4局が親の連荘ではなく決着（親交代、または流局で親が非テンパイ）で終わったら、
+  // その半荘は終了とみなす。
+  const relevantProgress = roundProgress.filter((h) => h.winType !== "chombo");
+  const lastProgress = relevantProgress[relevantProgress.length - 1];
+  const isDone =
+    !!lastProgress && lastProgress.roundIndex === ROUND_OPTIONS.length - 1 && !isDealerContinuing(lastProgress);
+
   return c.html(
-    <Layout title={`第${session.seq}半荘: 対局中`} isAdmin={true}>
+    <Layout title={`第${session.seq}半荘: 対局中`} isAdmin={true} openDayId={openDayId}>
       <p>
         <a href={`/days/${dayId}`}>← 対局日の詳細に戻る</a>
       </p>
@@ -866,7 +945,7 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
                 : [];
               return (
                 <li>
-                  {h.roundLabel ? `${h.roundLabel}: ` : ""}
+                  {h.roundLabel ? `${h.roundLabel}${h.honba ? ` ${h.honba}本場` : ""}: ` : ""}
                   {h.winType === "draw" && `流局${tenpaiNames.length > 0 ? `（テンパイ: ${tenpaiNames.join("、")}）` : ""}`}
                   {h.winType === "chombo" && `チョンボ（${targetName ?? "?"}）`}
                   {h.winType === "tsumo" && `${winnerName}がツモ`}
@@ -911,9 +990,10 @@ dayRoutes.get("/days/:id/sessions/:sid/capture", requireAdmin, async (c) => {
   const dayId = Number(c.req.param("id"));
   const sessionId = Number(c.req.param("sid"));
   const admin = true;
+  const openDayId = await getOpenDayId(getDb(c.env));
 
   return c.html(
-    <Layout title="点数表示機を撮影" isAdmin={admin}>
+    <Layout title="点数表示機を撮影" isAdmin={admin} openDayId={openDayId}>
       <h1>第{sessionId}半荘: 点数表示機を撮影</h1>
       <div class="card">
         <input type="file" id="photo-input" accept="image/*" capture="environment" />
@@ -989,33 +1069,35 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
   const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));
   if (!session) return c.notFound();
 
-  const rows = await db
-    .select({
-      seatIndex: sessionScores.seatIndex,
-      playerId: sessionScores.playerId,
-      name: players.name,
-      rawScore: sessionScores.rawScore,
-      isHakoware: sessionScores.isHakoware,
-    })
-    .from(sessionScores)
-    .innerJoin(players, eq(sessionScores.playerId, players.id))
-    .where(eq(sessionScores.gameSessionId, sessionId))
-    .orderBy(asc(sessionScores.seatIndex));
-
-  const dayParticipantOptions = await db
-    .select({ playerId: players.id, name: players.name })
-    .from(dayParticipants)
-    .innerJoin(players, eq(dayParticipants.playerId, players.id))
-    .where(eq(dayParticipants.dayId, dayId));
-
-  // imageData（写真BLOB本体）はこの画面では使わない（表示用リンクは/api/photos/:idが別途取得する）ので、
-  // 使うカラムだけ選択して毎回の無駄なBLOB読み込みを避ける。
-  const [latestPhoto] = await db
-    .select({ id: photoUploads.id, ocrRawJson: photoUploads.ocrRawJson })
-    .from(photoUploads)
-    .where(eq(photoUploads.gameSessionId, sessionId))
-    .orderBy(desc(photoUploads.id))
-    .limit(1);
+  const [rows, dayParticipantOptions, latestPhotoRows, openDayId] = await Promise.all([
+    db
+      .select({
+        seatIndex: sessionScores.seatIndex,
+        playerId: sessionScores.playerId,
+        name: players.name,
+        rawScore: sessionScores.rawScore,
+        isHakoware: sessionScores.isHakoware,
+      })
+      .from(sessionScores)
+      .innerJoin(players, eq(sessionScores.playerId, players.id))
+      .where(eq(sessionScores.gameSessionId, sessionId))
+      .orderBy(asc(sessionScores.seatIndex)),
+    db
+      .select({ playerId: players.id, name: players.name })
+      .from(dayParticipants)
+      .innerJoin(players, eq(dayParticipants.playerId, players.id))
+      .where(eq(dayParticipants.dayId, dayId)),
+    // imageData（写真BLOB本体）はこの画面では使わない（表示用リンクは/api/photos/:idが別途取得する）ので、
+    // 使うカラムだけ選択して毎回の無駄なBLOB読み込みを避ける。
+    db
+      .select({ id: photoUploads.id, ocrRawJson: photoUploads.ocrRawJson })
+      .from(photoUploads)
+      .where(eq(photoUploads.gameSessionId, sessionId))
+      .orderBy(desc(photoUploads.id))
+      .limit(1),
+    getOpenDayId(db),
+  ]);
+  const [latestPhoto] = latestPhotoRows;
 
   let ocrValues: (number | null)[] = [null, null, null, null];
   if (latestPhoto?.ocrRawJson) {
@@ -1036,7 +1118,7 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
   const badSumWarning = c.req.query("badsum") === "1";
 
   return c.html(
-    <Layout title="点数を確認" isAdmin={true}>
+    <Layout title="点数を確認" isAdmin={true} openDayId={openDayId}>
       <h1>第{session.seq}半荘: 点数を確認</h1>
       {badSumWarning && (
         <p class="warning">4人分のポイントの合計が0になっていません。入力ミスがないか確認してください。</p>
@@ -1231,6 +1313,8 @@ dayRoutes.post("/days/:id/sessions/:sid/hands", requireAdmin, async (c) => {
   const winnerPlayerId = body.winnerPlayerId ? Number(body.winnerPlayerId) : null;
   const loserPlayerId = body.loserPlayerId ? Number(body.loserPlayerId) : null;
   const roundLabel = body.roundLabel ? String(body.roundLabel) : null;
+  const honbaRaw = body.honba != null ? Number(body.honba) : 0;
+  const honba = Number.isFinite(honbaRaw) && honbaRaw >= 0 ? Math.trunc(honbaRaw) : 0;
   const yakuText = body.yakuText ? String(body.yakuText) : null;
   const points = body.points ? Number(body.points) : null;
 
@@ -1244,6 +1328,7 @@ dayRoutes.post("/days/:id/sessions/:sid/hands", requireAdmin, async (c) => {
     // ロン時は放銃者、チョンボ時はチョンボした対象プレイヤーとしてloserPlayerIdを使い回す
     loserPlayerId: winType === "ron" || winType === "chombo" ? loserPlayerId : null,
     roundLabel,
+    honba,
     yakuText,
     points: Number.isFinite(points) ? points : null,
     tenpaiPlayerIds: winType === "draw" && tenpaiPlayerIds.length > 0 ? JSON.stringify(tenpaiPlayerIds.map(Number)) : null,
@@ -1306,15 +1391,15 @@ dayRoutes.get("/days/:id/edit", requireAdmin, async (c) => {
   const [day] = await db.select().from(days).where(eq(days.id, dayId));
   if (!day) return c.notFound();
 
-  const allPlayers = await db.select().from(players).orderBy(players.id);
-  const currentParticipants = await db
-    .select({ playerId: dayParticipants.playerId })
-    .from(dayParticipants)
-    .where(eq(dayParticipants.dayId, dayId));
+  const [allPlayers, currentParticipants, openDayId] = await Promise.all([
+    db.select().from(players).orderBy(players.id),
+    db.select({ playerId: dayParticipants.playerId }).from(dayParticipants).where(eq(dayParticipants.dayId, dayId)),
+    getOpenDayId(db),
+  ]);
   const currentIds = new Set(currentParticipants.map((p) => p.playerId));
 
   return c.html(
-    <Layout title="対局日を編集" isAdmin={true}>
+    <Layout title="対局日を編集" isAdmin={true} openDayId={openDayId}>
       <h1>対局日を編集</h1>
       <div class="card">
         <form class="stack" method="post" action={`/days/${dayId}/edit`}>
@@ -1450,6 +1535,8 @@ async function renderSheetPage(
   const [day] = await db.select().from(days).where(eq(days.id, dayId));
   if (!day) return c.notFound();
 
+  const openDayId = await getOpenDayId(db);
+
   const participants = await db
     .select({ playerId: players.id, name: players.name })
     .from(dayParticipants)
@@ -1480,7 +1567,7 @@ async function renderSheetPage(
   const subtotalWarnings = opts.subtotalWarnings ?? [];
 
   return c.html(
-    <Layout title="まとめて入力" isAdmin={true}>
+    <Layout title="まとめて入力" isAdmin={true} openDayId={openDayId}>
       <h1>{day.date}: まとめて入力</h1>
       {partialSeqs.length > 0 && (
         <p class="warning">

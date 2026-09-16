@@ -5,6 +5,7 @@ import {
   computeYakumanChips,
   sumScores,
   computeLiveScores,
+  computeNextRoundState,
 } from "../src/lib/scoring";
 
 // アプリ全体で保存・集計する点数の単位は「ポイント」＝配給原点(25000点=25ポイント)からの
@@ -169,5 +170,62 @@ describe("computeLiveScores", () => {
     ]);
     // フォールバックで親=0(起家)扱いになるため、非親のツモ配分（親1/2・子1/4ずつ）になる
     expect(scores).toEqual([-3000, 6000, -1500, -1500]);
+  });
+});
+
+describe("computeNextRoundState", () => {
+  it("履歴が無ければ東1局(index0)・0本場から開始する", () => {
+    expect(computeNextRoundState([], 7)).toEqual({ roundIndex: 0, honba: 0 });
+  });
+
+  it("親（座席0）が和了すると、同じ局のまま本場が+1になる", () => {
+    const state = computeNextRoundState(
+      [{ winType: "tsumo", roundIndex: 0, honba: 0, dealerSeat: 0, winnerSeat: 0, tenpaiSeats: [] }],
+      7,
+    );
+    expect(state).toEqual({ roundIndex: 0, honba: 1 });
+  });
+
+  it("親以外が和了すると、次の局に進み本場は0に戻る", () => {
+    const state = computeNextRoundState(
+      [{ winType: "ron", roundIndex: 0, honba: 2, dealerSeat: 0, winnerSeat: 2, tenpaiSeats: [] }],
+      7,
+    );
+    expect(state).toEqual({ roundIndex: 1, honba: 0 });
+  });
+
+  it("流局で親（座席0）がテンパイなら、同じ局のまま本場が+1になる", () => {
+    const state = computeNextRoundState(
+      [{ winType: "draw", roundIndex: 3, honba: 1, dealerSeat: 0, winnerSeat: null, tenpaiSeats: [0, 2] }],
+      7,
+    );
+    expect(state).toEqual({ roundIndex: 3, honba: 2 });
+  });
+
+  it("流局で親が非テンパイなら、次の局に進み本場は0に戻る", () => {
+    const state = computeNextRoundState(
+      [{ winType: "draw", roundIndex: 3, honba: 1, dealerSeat: 0, winnerSeat: null, tenpaiSeats: [1, 2] }],
+      7,
+    );
+    expect(state).toEqual({ roundIndex: 4, honba: 0 });
+  });
+
+  it("チョンボは同じ局をやり直す扱いなので判定対象から除外し、その前の局の結果を引き継ぐ", () => {
+    const state = computeNextRoundState(
+      [
+        { winType: "ron", roundIndex: 0, honba: 0, dealerSeat: 0, winnerSeat: 2, tenpaiSeats: [] },
+        { winType: "chombo", roundIndex: 1, honba: 0, dealerSeat: 1, winnerSeat: null, tenpaiSeats: [] },
+      ],
+      7,
+    );
+    expect(state).toEqual({ roundIndex: 1, honba: 0 });
+  });
+
+  it("最終局（南4局）を超えて進めない", () => {
+    const state = computeNextRoundState(
+      [{ winType: "ron", roundIndex: 7, honba: 0, dealerSeat: 3, winnerSeat: 1, tenpaiSeats: [] }],
+      7,
+    );
+    expect(state).toEqual({ roundIndex: 7, honba: 0 });
   });
 });

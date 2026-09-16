@@ -25,6 +25,7 @@ import {
   computeRankDistributionForAllPlayers,
   computeYakumanHistory,
 } from "../lib/aggregate";
+import { getOpenDayId } from "../lib/dayState";
 import { computeScoreTable, FIXED_TIERS, FU_CALC_TABLE } from "../lib/scoreTable";
 
 export const statsRoutes = new Hono<{ Bindings: Env }>();
@@ -37,7 +38,7 @@ statsRoutes.get("/years/:year", async (c) => {
   const admin = await isAdmin(c);
 
   const range = yearRange(year);
-  const [totals, daysInYear, rankDistribution, yakumanHistory] = await Promise.all([
+  const [totals, daysInYear, rankDistribution, yakumanHistory, openDayId] = await Promise.all([
     computeTotals(db, range),
     db
       .select()
@@ -46,10 +47,11 @@ statsRoutes.get("/years/:year", async (c) => {
       .orderBy(desc(days.date)),
     computeRankDistributionForAllPlayers(db, range),
     computeYakumanHistory(db, range),
+    admin ? getOpenDayId(db) : Promise.resolve(null),
   ]);
 
   return c.html(
-    <Layout title={`${year}年の成績`} isAdmin={admin}>
+    <Layout title={`${year}年の成績`} isAdmin={admin} openDayId={openDayId}>
       <TabBar active="history" />
       <HistorySubTabs active="year" year={year} />
       <h1>{year}年の成績</h1>
@@ -94,14 +96,15 @@ statsRoutes.get("/years/:year", async (c) => {
 statsRoutes.get("/overall", async (c) => {
   const db = getDb(c.env);
   const admin = await isAdmin(c);
-  const [totals, rankDistribution, yakumanHistory] = await Promise.all([
+  const [totals, rankDistribution, yakumanHistory, openDayId] = await Promise.all([
     computeTotals(db),
     computeRankDistributionForAllPlayers(db),
     computeYakumanHistory(db),
+    admin ? getOpenDayId(db) : Promise.resolve(null),
   ]);
 
   return c.html(
-    <Layout title="通算成績" isAdmin={admin}>
+    <Layout title="通算成績" isAdmin={admin} openDayId={openDayId}>
       <TabBar active="history" />
       <HistorySubTabs active="overall" />
       <h1>通算成績</h1>
@@ -128,10 +131,11 @@ const fmt = (n: number | null) => (n == null ? "-" : n.toLocaleString("ja-JP"));
 
 statsRoutes.get("/scoretable", async (c) => {
   const admin = await isAdmin(c);
+  const openDayId = admin ? await getOpenDayId(getDb(c.env)) : null;
   const table = computeScoreTable();
 
   return c.html(
-    <Layout title="点数表" isAdmin={admin}>
+    <Layout title="点数表" isAdmin={admin} openDayId={openDayId}>
       <TabBar active="scoretable" />
       <h1>点数表</h1>
       <p style="font-size:0.85rem; color:var(--felt-soft)">
@@ -273,11 +277,12 @@ statsRoutes.get("/players/:id", async (c) => {
   const [player] = await db.select().from(players).where(eq(players.id, playerId));
   if (!player) return c.notFound();
 
-  const [rawTotal, yearly, rankDist, yakumanWins] = await Promise.all([
+  const [rawTotal, yearly, rankDist, yakumanWins, openDayId] = await Promise.all([
     computePlayerRawTotal(db, playerId),
     computePlayerYearlyBreakdown(db, playerId),
     computeRankDistribution(db, playerId),
     computePlayerYakumanWins(db, playerId),
+    admin ? getOpenDayId(db) : Promise.resolve(null),
   ]);
   const gameCount = rankDist.reduce((sum, r) => sum + r.count, 0);
 
@@ -289,7 +294,7 @@ statsRoutes.get("/players/:id", async (c) => {
   const dailyBreakdown = await computePlayerDailyBreakdown(db, playerId, yearRange(selectedYear));
 
   return c.html(
-    <Layout title={`${player.name} の成績`} isAdmin={admin}>
+    <Layout title={`${player.name} の成績`} isAdmin={admin} openDayId={openDayId}>
       <h1>{player.name} の成績</h1>
 
       <div class="card">

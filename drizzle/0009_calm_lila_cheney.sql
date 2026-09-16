@@ -1,0 +1,1 @@
+ALTER TABLE `hand_logs` ADD `honba` integer DEFAULT 0 NOT NULL;

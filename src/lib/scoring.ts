@@ -137,6 +137,51 @@ export function computeLiveScores(hands: LiveHandEntry[]): number[] {
   return scores;
 }
 
+export interface RoundProgressEntry {
+  winType: string;
+  /** この局が行われたROUND_OPTIONS上のインデックス(0-7) */
+  roundIndex: number;
+  /** この局に記録されている本場 */
+  honba: number;
+  /** この局の親の座席(0-3) */
+  dealerSeat: number;
+  /** 和了者の座席。ロン・ツモ以外はnull */
+  winnerSeat: number | null;
+  /** 流局時のテンパイ者の座席一覧 */
+  tenpaiSeats: number[];
+}
+
+/**
+ * その局の結果から、親が続投する（連荘＝次も同じ局・本場+1になる）かどうかを判定する。
+ * 親が和了、または流局で親がテンパイのときに続投。それ以外（親以外の和了、流局で親が非テンパイ）は
+ * 親が交代し、次は局が進んで本場は0に戻る。
+ */
+export function isDealerContinuing(hand: RoundProgressEntry): boolean {
+  return (
+    ((hand.winType === "ron" || hand.winType === "tsumo") && hand.winnerSeat === hand.dealerSeat) ||
+    (hand.winType === "draw" && hand.tenpaiSeats.includes(hand.dealerSeat))
+  );
+}
+
+/**
+ * 局メモの入力フォームに出す「次の局・本場」の初期値を、直近の履歴から提案する。
+ * チョンボは同じ局をやり直す扱いなので判定対象から除外する。履歴が無ければ東1局0本場から開始する。
+ * あくまでフォームの初期値の提案であり、実際に保存される値は入力時点の手修正を反映したものになる。
+ */
+export function computeNextRoundState(
+  hands: RoundProgressEntry[],
+  maxRoundIndex: number,
+): { roundIndex: number; honba: number } {
+  const relevant = hands.filter((h) => h.winType !== "chombo");
+  const last = relevant[relevant.length - 1];
+  if (!last) return { roundIndex: 0, honba: 0 };
+
+  if (isDealerContinuing(last)) {
+    return { roundIndex: last.roundIndex, honba: last.honba + 1 };
+  }
+  return { roundIndex: Math.min(last.roundIndex + 1, maxRoundIndex), honba: 0 };
+}
+
 export interface YakumanChipResult {
   playerId: number;
   chip: number;

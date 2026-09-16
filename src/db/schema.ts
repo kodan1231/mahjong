@@ -113,6 +113,9 @@ export const handLogs = sqliteTable(
     gameSessionId: integer("game_session_id").notNull().references(() => gameSessions.id),
     seq: integer("seq"), // 何局目か（任意）
     roundLabel: text("round_label"), // 「東1局」等（任意）
+    // 本場（連荘数）。前の局で親が和了、または流局で親がテンパイのときに+1、それ以外は0に戻る想定だが、
+    // 自動計算値は入力フォーム側の初期値でしかなく、ここには実際に保存された（必要なら手修正済みの）値が入る。
+    honba: integer("honba").notNull().default(0),
     winType: text("win_type", { enum: ["ron", "tsumo", "draw", "chombo"] }).notNull(),
     winnerPlayerId: integer("winner_player_id").references(() => players.id),
     // ロン時は放銃者、チョンボ時はチョンボした対象プレイヤーを指す（UI上はどちらも「対象」と表現する）

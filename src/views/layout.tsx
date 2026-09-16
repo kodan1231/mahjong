@@ -1,11 +1,8 @@
 import type { FC, PropsWithChildren, Child } from "hono/jsx";
 
-export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean; extraHead?: Child }>> = ({
-  title,
-  isAdmin,
-  extraHead,
-  children,
-}) => (
+export const Layout: FC<
+  PropsWithChildren<{ title: string; isAdmin: boolean; openDayId?: number | null; extraHead?: Child }>
+> = ({ title, isAdmin, openDayId = null, extraHead, children }) => (
   <html lang="ja">
     <head>
       <meta charset="utf-8" />
@@ -36,12 +33,19 @@ export const Layout: FC<PropsWithChildren<{ title: string; isAdmin: boolean; ext
           {isAdmin ? (
             <>
               <a href="/">ホーム</a>
-              <a href="/days/new">対局日を開始</a>
-              <form method="post" action="/days/close" class="inline-form">
-                <button type="submit" class="link-button">
-                  対局日を終了
-                </button>
-              </form>
+              {openDayId != null ? (
+                <>
+                  <form method="post" action="/days/close" class="inline-form">
+                    <button type="submit" class="link-button">
+                      対局日を終了
+                    </button>
+                  </form>
+                  {/* 「開始」リンクは対局中は隠すが、その間も過去日のバックフィル登録には/days/newを使うので別途導線を残す */}
+                  <a href="/days/new">過去の対局を登録</a>
+                </>
+              ) : (
+                <a href="/days/new">対局日を開始</a>
+              )}
               <a href="/players">プレイヤー管理</a>
               <form method="post" action="/logout" class="inline-form">
                 <button type="submit" class="link-button">

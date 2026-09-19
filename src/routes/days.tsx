@@ -1182,7 +1182,7 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
   const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));
   if (!session) return c.notFound();
 
-  const [rows, dayParticipantOptions, hands, openDayId] = await Promise.all([
+  const [rows, hands, openDayId] = await Promise.all([
     db
       .select({
         seatIndex: sessionScores.seatIndex,
@@ -1190,17 +1190,11 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
         name: players.name,
         rawScore: sessionScores.rawScore,
         rank: sessionScores.rank,
-        isHakoware: sessionScores.isHakoware,
       })
       .from(sessionScores)
       .innerJoin(players, eq(sessionScores.playerId, players.id))
       .where(eq(sessionScores.gameSessionId, sessionId))
       .orderBy(asc(sessionScores.seatIndex)),
-    db
-      .select({ playerId: players.id, name: players.name })
-      .from(dayParticipants)
-      .innerJoin(players, eq(dayParticipants.playerId, players.id))
-      .where(eq(dayParticipants.dayId, dayId)),
     db.select().from(handLogs).where(eq(handLogs.gameSessionId, sessionId)).orderBy(asc(handLogs.id)),
     getOpenDayId(db),
   ]);
@@ -1251,25 +1245,10 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
             <div class="seat-block">
               <div class="seat-row">
                 <span class="seat-label">{WIND_LABELS[r.seatIndex]}</span>
-                <div class="choice-group">
-                  {dayParticipantOptions.map((p) => (
-                    <label class="choice-btn">
-                      <input
-                        type="radio"
-                        name={`player_${r.seatIndex}`}
-                        value={p.playerId}
-                        checked={p.playerId === r.playerId}
-                      />
-                      {p.name}
-                    </label>
-                  ))}
-                </div>
+                <strong>{r.name}</strong>
               </div>
               <div class="seat-row">
                 <input type="number" step="0.1" name={`score_${r.seatIndex}`} value={String(prefill)} required />
-                <label style="font-weight:normal">
-                  <input type="checkbox" name={`hakoware_${r.seatIndex}`} checked={r.isHakoware} /> 箱割れ
-                </label>
               </div>
               {tieWarning && (
                 <div class="seat-row">
@@ -1320,11 +1299,18 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
   const db = getDb(c.env);
   const body = await c.req.parseBody();
 
+  // 各座席のプレイヤーはこの画面では変更しない（半荘開始時の座席登録が唯一の紐づけ元）ため、
+  // フォームの送信値ではなく現在のDBの値をそのまま使う。
+  const existingSeats = await db
+    .select({ seatIndex: sessionScores.seatIndex, playerId: sessionScores.playerId })
+    .from(sessionScores)
+    .where(eq(sessionScores.gameSessionId, sessionId));
+  const playerIdBySeat = new Map(existingSeats.map((s) => [s.seatIndex, s.playerId]));
+
   const seatInputs = [0, 1, 2, 3].map((seatIndex) => ({
     seatIndex,
-    playerId: Number(body[`player_${seatIndex}`]),
+    playerId: playerIdBySeat.get(seatIndex)!,
     rawScore: Number(body[`score_${seatIndex}`]),
-    isHakoware: body[`hakoware_${seatIndex}`] === "on",
     tieBreakPriority: body[`tiebreak_${seatIndex}`] != null ? Number(body[`tiebreak_${seatIndex}`]) : undefined,
   }));
 
@@ -1335,7 +1321,7 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
     for (const s of seatInputs) {
       await db
         .update(sessionScores)
-        .set({ playerId: s.playerId, rawScore: s.rawScore, isHakoware: s.isHakoware })
+        .set({ rawScore: s.rawScore })
         .where(and(eq(sessionScores.gameSessionId, sessionId), eq(sessionScores.seatIndex, s.seatIndex)));
     }
     return c.redirect(`/days/${dayId}/sessions/${sessionId}/confirm?badsum=1`);
@@ -1350,7 +1336,7 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
     for (const s of seatInputs) {
       await db
         .update(sessionScores)
-        .set({ playerId: s.playerId, rawScore: s.rawScore, isHakoware: s.isHakoware })
+        .set({ rawScore: s.rawScore })
         .where(and(eq(sessionScores.gameSessionId, sessionId), eq(sessionScores.seatIndex, s.seatIndex)));
     }
     return c.redirect(`/days/${dayId}/sessions/${sessionId}/confirm?tie=1`);
@@ -1378,11 +1364,9 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
       await db
         .update(sessionScores)
         .set({
-          playerId: s.playerId,
           rawScore: s.rawScore,
           rank: r?.rank ?? null,
           rankChip: r?.rankChip ?? null,
-          isHakoware: s.isHakoware,
         })
         .where(and(eq(sessionScores.gameSessionId, sessionId), eq(sessionScores.seatIndex, s.seatIndex)));
     }
@@ -1394,11 +1378,9 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
     await db
       .update(sessionScores)
       .set({
-        playerId: s.playerId,
         rawScore: roundedPoints.get(s.playerId) ?? 0,
         rank: r?.rank ?? null,
         rankChip: r?.rankChip ?? null,
-        isHakoware: s.isHakoware,
       })
       .where(and(eq(sessionScores.gameSessionId, sessionId), eq(sessionScores.seatIndex, s.seatIndex)));
   }

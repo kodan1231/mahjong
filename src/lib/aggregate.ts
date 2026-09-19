@@ -687,9 +687,11 @@ export async function computePlayerTraits(db: Db, playerId: number): Promise<Pla
   if (currentSessionId != null) closeDealerTurn();
 
   const avgWinPoints = average(winHands.filter((h) => h.points != null).map((h) => h.points!));
-  const avgOmoteDora = average(winHands.filter((h) => h.omoteDoraCount != null).map((h) => h.omoteDoraCount!));
-  const avgUraDora = average(winHands.filter((h) => h.uraDoraCount != null).map((h) => h.uraDoraCount!));
-  const avgAkaDora = average(winHands.filter((h) => h.akaDoraCount != null).map((h) => h.akaDoraCount!));
+  // ドラ枚数は未入力（null）の和了を分母から除外せず、0枚として平均に含める
+  // （「入力がない場合は0枚として計算する」というフィードバックへの対応）。
+  const avgOmoteDora = average(winHands.map((h) => h.omoteDoraCount ?? 0));
+  const avgUraDora = average(winHands.map((h) => h.uraDoraCount ?? 0));
+  const avgAkaDora = average(winHands.map((h) => h.akaDoraCount ?? 0));
 
   const yakuCounts = new Map<string, number>();
   for (const h of winHands) {

@@ -181,35 +181,8 @@ const css = `
   .tab-bar-sub { padding: 3px; margin-bottom: 14px; max-width: 280px; }
   .tab-bar-sub .tab { padding: 6px 6px; font-size: 0.82rem; }
 
-  /* 対局中ページの「現在のスコア」十字レイアウト。起家を上、時計回りに南家(右)・西家(下)・北家(左)。 */
-  .score-cross {
-    display: grid;
-    grid-template-columns: 1fr 1.2fr 1fr;
-    grid-template-rows: auto auto auto;
-    grid-template-areas:
-      ".    top    ."
-      "left center right"
-      ".    bottom .";
-    gap: 8px;
-    max-width: 420px;
-    margin: 0 auto;
-  }
-  .score-cross-top { grid-area: top; }
-  .score-cross-right { grid-area: right; }
-  .score-cross-bottom { grid-area: bottom; }
-  .score-cross-left { grid-area: left; }
-  .score-cross-cell {
-    background: var(--tile);
-    border: 1px solid var(--tile-edge);
-    border-radius: 10px;
-    padding: 8px 6px;
-    text-align: center;
-    color: var(--ink);
-  }
-  .score-cross-wind { font-size: 0.75rem; font-weight: 700; color: var(--ink-soft); position: relative; }
+  /* 対局中ページの「現在のスコア」表内の親バッジ。 */
   .score-cross-dealer { margin-left: 4px; padding: 1px 7px; font-size: 0.62rem; vertical-align: middle; }
-  .score-cross-name { font-weight: 700; font-size: 0.95rem; margin: 2px 0; }
-  .score-cross-score { font-size: 1.1rem; }
 
   table { width: 100%; border-collapse: collapse; margin: 6px 0; color: var(--ink); }
   th, td { padding: 5px 4px; border-bottom: 1px solid var(--tile-edge); text-align: right; font-variant-numeric: tabular-nums; }

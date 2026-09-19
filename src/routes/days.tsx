@@ -1114,7 +1114,18 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
       </div>
 
       <div class="card">
-        <h2>局メモ</h2>
+        <h2 id="hand-form">{editingHand ? "局メモを編集" : "局メモを追加"}</h2>
+        <HandLogForm
+          dayId={dayId}
+          sessionId={sessionId}
+          nameBySeat={nameBySeat}
+          seatPlayers={seatRows}
+          hands={hands}
+          editingHand={editingHand}
+          cancelHref={`/days/${dayId}/sessions/${sessionId}`}
+        />
+
+        <h3>これまでの局メモ</h3>
         {hands.length === 0 && <p>まだ記録がありません。</p>}
         {hands.length > 0 && (
           <ul>
@@ -1145,17 +1156,6 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
             })}
           </ul>
         )}
-
-        <h3 id="hand-form">{editingHand ? "局メモを編集" : "局メモを追加"}</h3>
-        <HandLogForm
-          dayId={dayId}
-          sessionId={sessionId}
-          nameBySeat={nameBySeat}
-          seatPlayers={seatRows}
-          hands={hands}
-          editingHand={editingHand}
-          cancelHref={`/days/${dayId}/sessions/${sessionId}`}
-        />
       </div>
 
       {isDone && (

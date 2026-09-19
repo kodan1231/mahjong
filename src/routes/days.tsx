@@ -131,15 +131,33 @@ function resolveRoundProgressEntries(
   return entries;
 }
 
-// 局メモ一覧表示用: リーチ・鳴き・ドラ枚数を「（リーチ: ○○／鳴き: ○○／ドラ表1・裏1）」のような
-// 一つの括弧書きにまとめる。日別ページ・対局中ページの両方の局メモ表示から共通で使う。
+// 局メモ一覧表示用: 上がった本人の情報である役・ドラ枚数を「（立直、門前清自摸和、ドラ赤1）」のように
+// 一つの括弧書きにまとめる。リーチ・鳴きは「誰が」した行為かを表す別情報なので別の括弧に分ける
+// （describeHandExtras）。日別ページ・対局中ページの両方の局メモ表示から共通で使う。
+function describeYakuAndDora(h: {
+  yakuText: string | null;
+  omoteDoraCount: number | null;
+  uraDoraCount: number | null;
+  akaDoraCount: number | null;
+}): string {
+  const doraParts: string[] = [];
+  if (h.omoteDoraCount) doraParts.push(`表${h.omoteDoraCount}`);
+  if (h.uraDoraCount) doraParts.push(`裏${h.uraDoraCount}`);
+  if (h.akaDoraCount) doraParts.push(`赤${h.akaDoraCount}`);
+
+  const parts: string[] = [];
+  if (h.yakuText) parts.push(h.yakuText);
+  if (doraParts.length > 0) parts.push(`ドラ${doraParts.join("・")}`);
+
+  return parts.length > 0 ? `（${parts.join("、")}）` : "";
+}
+
+// 局メモ一覧表示用: リーチ・鳴きを「（リーチ: ○○／鳴き: ○○）」のような一つの括弧書きにまとめる。
+// 日別ページ・対局中ページの両方の局メモ表示から共通で使う。
 function describeHandExtras(
   h: {
     riichiPlayerIds: string | null;
     nakiPlayerIds: string | null;
-    omoteDoraCount: number | null;
-    uraDoraCount: number | null;
-    akaDoraCount: number | null;
   },
   nameOf: (playerId: number) => string,
 ): string {
@@ -157,12 +175,6 @@ function describeHandExtras(
       // ignore parse errors
     }
   }
-
-  const doraParts: string[] = [];
-  if (h.omoteDoraCount) doraParts.push(`表${h.omoteDoraCount}`);
-  if (h.uraDoraCount) doraParts.push(`裏${h.uraDoraCount}`);
-  if (h.akaDoraCount) doraParts.push(`赤${h.akaDoraCount}`);
-  if (doraParts.length > 0) parts.push(`ドラ${doraParts.join("・")}`);
 
   return parts.length > 0 ? `（${parts.join("／")}）` : "";
 }
@@ -636,7 +648,7 @@ const DayDetailBody = ({
                           rows.find((r) => r.playerId === h.loserPlayerId)?.name ?? "?"
                         }からロン`}
                       {h.points ? ` ${h.points}点` : ""}
-                      {h.yakuText ? `（${h.yakuText}）` : ""}
+                      {describeYakuAndDora(h)}
                       {describeHandExtras(h, (id) => rows.find((r) => r.playerId === id)?.name ?? "?")}
                       {admin && !isSubtotalBlock && (
                         <>
@@ -1131,7 +1143,7 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
                   {h.winType === "tsumo" && `${winnerName}がツモ`}
                   {h.winType === "ron" && `${winnerName}が${targetName}からロン`}
                   {h.points ? ` ${h.points}点` : ""}
-                  {h.yakuText ? `（${h.yakuText}）` : ""}
+                  {describeYakuAndDora(h)}
                   {describeHandExtras(h, (id) => nameByPlayerId.get(id) ?? "?")}{" "}
                   <a href={`?edit=${h.id}#hand-form`}>編集</a>
                   <form class="inline-form" method="post" action={`/days/${dayId}/hands/${h.id}/delete`}>

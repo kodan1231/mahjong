@@ -302,7 +302,7 @@ statsRoutes.get("/players/:id", async (c) => {
           <>
             <div class="card">
               <h2>和了・進行（{traits.handCount}局中）</h2>
-              <table class="session-table">
+              <table>
                 <tbody>
                   <tr>
                     <td>上がり率</td>
@@ -341,7 +341,7 @@ statsRoutes.get("/players/:id", async (c) => {
 
             <div class="card">
               <h2>ドラ平均（和了時）</h2>
-              <table class="session-table">
+              <table>
                 <tbody>
                   <tr>
                     <td>表ドラ平均</td>
@@ -372,7 +372,7 @@ statsRoutes.get("/players/:id", async (c) => {
               {traits.yakuBreakdown.length === 0 ? (
                 <p>まだ役の記録がありません。</p>
               ) : (
-                <table class="session-table">
+                <table>
                   <thead>
                     <tr>
                       <th>役</th>
@@ -470,7 +470,7 @@ statsRoutes.get("/players/:id", async (c) => {
         <h2>年別</h2>
         {yearly.length === 0 && <p>まだ対局記録がありません。</p>}
         {yearly.length > 0 && (
-          <table>
+          <table class="session-table">
             <thead>
               <tr>
                 <th>年</th>
@@ -495,7 +495,7 @@ statsRoutes.get("/players/:id", async (c) => {
 
       <div class="card">
         <h2>着順分布</h2>
-        <table>
+        <table class="session-table">
           <thead>
             <tr>
               <th>着順</th>

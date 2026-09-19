@@ -1028,7 +1028,13 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
                   {WIND_LABELS[i]}
                   {currentDealerSeat === i && <span class="badge badge-open score-cross-dealer">親</span>}
                 </td>
-                <td>{nameBySeat[i]}</td>
+                <td>
+                  {seatPlayerIds[i] != null ? (
+                    <a href={`/players/${seatPlayerIds[i]}`}>{nameBySeat[i]}</a>
+                  ) : (
+                    nameBySeat[i]
+                  )}
+                </td>
                 <td>
                   <span class={(liveScores[i] ?? 0) >= 0 ? "plus" : "minus"}>
                     {(ORIGIN_SCORE * 1000 + (liveScores[i] ?? 0)).toLocaleString("ja-JP")}

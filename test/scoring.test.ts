@@ -125,70 +125,55 @@ describe("computeYakumanChips", () => {
 describe("computeLiveScores", () => {
   it("ロン: 和了者+points、対象-pointsのシンプルな授受", () => {
     const scores = computeLiveScores([
-      { winType: "ron", winnerSeat: 0, loserSeat: 2, dealerSeat: 0, points: 3900, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "ron", winnerSeat: 0, loserSeat: 2, dealerSeat: 0, points: 3900, honba: 0, riichiSeats: [], tenpaiSeats: [] },
     ]);
     expect(scores).toEqual([3900, 0, -3900, 0]);
   });
 
   it("親のツモ: 3人が均等にpoints/3ずつ支払う", () => {
     const scores = computeLiveScores([
-      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: 1, points: 6000, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: 1, points: 6000, honba: 0, riichiSeats: [], tenpaiSeats: [] },
     ]);
     expect(scores).toEqual([-2000, 6000, -2000, -2000]);
   });
 
-  it("子のツモ（後方互換）: dealerPoints未指定時はpointsを総受取とみなし親1/2・子1/4ずつで近似する", () => {
+  it("子のツモ: 親がpoints/2、残り2人の子がpoints/4ずつ支払う", () => {
     const scores = computeLiveScores([
-      { winType: "tsumo", winnerSeat: 3, loserSeat: null, dealerSeat: 2, points: 5200, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "tsumo", winnerSeat: 3, loserSeat: null, dealerSeat: 2, points: 5200, honba: 0, riichiSeats: [], tenpaiSeats: [] },
     ]);
     expect(scores).toEqual([-1300, -1300, -2600, 5200]);
   });
 
-  it("子のツモ: dealerPoints指定時は親の支払いが子のちょうど2倍でなくても正しく計算する（1300/700）", () => {
-    const scores = computeLiveScores([
-      { winType: "tsumo", winnerSeat: 3, loserSeat: null, dealerSeat: 0, points: 700, dealerPoints: 1300, honba: 0, riichiSeats: [], tenpaiSeats: [] },
-    ]);
-    // 親(0)-1300、子(1)-700、子(2)-700、和了者(3)+2700(=1300+700+700)
-    expect(scores).toEqual([-1300, -700, -700, 2700]);
-  });
-
-  it("子のツモ: dealerPoints指定時も本場分（3人均等）は変わらず上乗せする", () => {
-    const scores = computeLiveScores([
-      { winType: "tsumo", winnerSeat: 3, loserSeat: null, dealerSeat: 0, points: 700, dealerPoints: 1300, honba: 1, riichiSeats: [], tenpaiSeats: [] },
-    ]);
-    expect(scores).toEqual([-1300 - 100, -700 - 100, -700 - 100, 2700 + 300]);
-  });
-
   it("流局（テンパイ者なし）・チョンボは素点の授受をスコアに反映しない", () => {
     const scores = computeLiveScores([
-      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 0, points: null, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
-      { winType: "chombo", winnerSeat: null, loserSeat: 1, dealerSeat: 0, points: null, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 0, points: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "chombo", winnerSeat: null, loserSeat: 1, dealerSeat: 0, points: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
     ]);
     expect(scores).toEqual([0, 0, 0, 0]);
   });
 
   it("流局: テンパイ1人はノーテン3人から1000ずつ徴収し3000を総取りする", () => {
     const scores = computeLiveScores([
-      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 1, points: null, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [2] },
+      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 1, points: null, honba: 0, riichiSeats: [], tenpaiSeats: [2] },
     ]);
     expect(scores).toEqual([-1000, -1000, 3000, -1000]);
   });
 
   it("流局: テンパイ2人・ノーテン2人は1500ずつの授受になる", () => {
     const scores = computeLiveScores([
-      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 0, points: null, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [0, 1] },
+      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 0, points: null, honba: 0, riichiSeats: [], tenpaiSeats: [0, 1] },
     ]);
     expect(scores).toEqual([1500, 1500, -1500, -1500]);
   });
 
   it("流局: 全員テンパイ・全員ノーテンでは授受なし", () => {
     const allTenpai = computeLiveScores([
-      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 0, points: null, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [0, 1, 2, 3] },
+      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 0, points: null, honba: 0, riichiSeats: [], tenpaiSeats: [0, 1, 2, 3] },
     ]);
     expect(allTenpai).toEqual([0, 0, 0, 0]);
 
     const allNoten = computeLiveScores([
-      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 0, points: null, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 0, points: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
     ]);
     expect(allNoten).toEqual([0, 0, 0, 0]);
   });
@@ -198,16 +183,16 @@ describe("computeLiveScores", () => {
     // 東2局: 親=南家(1)がツモ、合計6000（2000オール）
     // 東3局: 親=西家(2)、子の北家(3)がツモ、合計5200（1300/2600）
     const scores = computeLiveScores([
-      { winType: "ron", winnerSeat: 0, loserSeat: 2, dealerSeat: 0, points: 3900, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
-      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: 1, points: 6000, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
-      { winType: "tsumo", winnerSeat: 3, loserSeat: null, dealerSeat: 2, points: 5200, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "ron", winnerSeat: 0, loserSeat: 2, dealerSeat: 0, points: 3900, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: 1, points: 6000, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "tsumo", winnerSeat: 3, loserSeat: null, dealerSeat: 2, points: 5200, honba: 0, riichiSeats: [], tenpaiSeats: [] },
     ]);
     expect(scores).toEqual([600, 4700, -8500, 3200]);
   });
 
   it("dealerSeatが分からない場合は起家(0)にフォールバックする", () => {
     const scores = computeLiveScores([
-      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: null, points: 6000, dealerPoints: null, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: null, points: 6000, honba: 0, riichiSeats: [], tenpaiSeats: [] },
     ]);
     // フォールバックで親=0(起家)扱いになるため、非親のツモ配分（親1/2・子1/4ずつ）になる
     expect(scores).toEqual([-3000, 6000, -1500, -1500]);
@@ -215,21 +200,21 @@ describe("computeLiveScores", () => {
 
   it("本場: ロンは対象が+300×本場を全額負担する（pointsは役の点数のみでOK）", () => {
     const scores = computeLiveScores([
-      { winType: "ron", winnerSeat: 0, loserSeat: 2, dealerSeat: 0, points: 3900, dealerPoints: null, honba: 2, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "ron", winnerSeat: 0, loserSeat: 2, dealerSeat: 0, points: 3900, honba: 2, riichiSeats: [], tenpaiSeats: [] },
     ]);
     expect(scores).toEqual([3900 + 600, 0, -(3900 + 600), 0]);
   });
 
   it("本場: ツモは3人が+100×本場ずつ均等負担する（親子の配分比とは無関係）", () => {
     const scores = computeLiveScores([
-      { winType: "tsumo", winnerSeat: 3, loserSeat: null, dealerSeat: 2, points: 5200, dealerPoints: null, honba: 1, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "tsumo", winnerSeat: 3, loserSeat: null, dealerSeat: 2, points: 5200, honba: 1, riichiSeats: [], tenpaiSeats: [] },
     ]);
     expect(scores).toEqual([-1300 - 100, -1300 - 100, -2600 - 100, 5200 + 300]);
   });
 
   it("リーチ: 宣言した時点で即座に-1000され、和了者が場の供託を丸ごと回収する", () => {
     const scores = computeLiveScores([
-      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: 1, points: 6000, dealerPoints: null, honba: 0, riichiSeats: [1], tenpaiSeats: [] },
+      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: 1, points: 6000, honba: 0, riichiSeats: [1], tenpaiSeats: [] },
     ]);
     // リーチ宣言(-1000)→和了で自分の供託を含む場の1000×1本を回収(+1000)、差し引き0
     expect(scores).toEqual([-2000, 6000, -2000, -2000]);
@@ -237,8 +222,8 @@ describe("computeLiveScores", () => {
 
   it("リーチ: 流局では素点授受は無いが供託だけは反映し、次の局に持ち越す", () => {
     const scores = computeLiveScores([
-      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 0, points: null, dealerPoints: null, honba: 0, riichiSeats: [0, 2], tenpaiSeats: [] },
-      { winType: "ron", winnerSeat: 1, loserSeat: 3, dealerSeat: 1, points: 2000, dealerPoints: null, honba: 1, riichiSeats: [], tenpaiSeats: [] },
+      { winType: "draw", winnerSeat: null, loserSeat: null, dealerSeat: 0, points: null, honba: 0, riichiSeats: [0, 2], tenpaiSeats: [] },
+      { winType: "ron", winnerSeat: 1, loserSeat: 3, dealerSeat: 1, points: 2000, honba: 1, riichiSeats: [], tenpaiSeats: [] },
     ]);
     // 東家(0)・西家(2)がリーチ(-1000ずつ) → 供託2本 → 次局のロンで和了者(1)が2本(2000)を回収
     expect(scores).toEqual([-1000, 2000 + 300 + 2000, -1000, -(2000 + 300)]);
@@ -246,7 +231,7 @@ describe("computeLiveScores", () => {
 
   it("リーチ: チョンボはこのスコアに一切反映しない（供託も含めて無視）", () => {
     const scores = computeLiveScores([
-      { winType: "chombo", winnerSeat: null, loserSeat: 1, dealerSeat: 0, points: null, dealerPoints: null, honba: 0, riichiSeats: [0], tenpaiSeats: [] },
+      { winType: "chombo", winnerSeat: null, loserSeat: 1, dealerSeat: 0, points: null, honba: 0, riichiSeats: [0], tenpaiSeats: [] },
     ]);
     expect(scores).toEqual([0, 0, 0, 0]);
   });

@@ -55,7 +55,6 @@ function resolveLiveHandEntries(
     winnerPlayerId: number | null;
     loserPlayerId: number | null;
     points: number | null;
-    dealerPoints: number | null;
     roundLabel: string | null;
     honba: number;
     riichiPlayerIds: string | null;
@@ -86,7 +85,6 @@ function resolveLiveHandEntries(
       loserSeat: h.loserPlayerId != null ? (seatOfPlayer.get(h.loserPlayerId) ?? null) : null,
       dealerSeat: roundIndex >= 0 ? roundIndex % 4 : null,
       points: h.points,
-      dealerPoints: h.dealerPoints,
       honba: h.honba,
       riichiSeats: resolveSeats(h.riichiPlayerIds),
       tenpaiSeats: resolveSeats(h.tenpaiPlayerIds),
@@ -185,7 +183,6 @@ interface EditingHand {
   honba: number;
   yakuText: string | null;
   points: number | null;
-  dealerPoints: number | null;
   tenpaiPlayerIds: string | null;
   riichiPlayerIds: string | null;
   nakiPlayerIds: string | null;
@@ -335,23 +332,8 @@ function HandLogForm({
           ))}
         </div>
 
-        <label for={`points-input-${uid}`} id={`points-label-${uid}`}>
-          点数（任意・役の点数のみ。本場・リーチ棒分は自動計算されます）
-        </label>
+        <label for={`points-input-${uid}`}>点数（任意・役の点数のみ。本場・リーチ棒分は自動計算されます）</label>
         <input type="number" step="100" name="points" id={`points-input-${uid}`} value={editingHand?.points ?? undefined} />
-
-        <div id={`dealer-points-field-${uid}`} hidden>
-          <label for={`dealer-points-input-${uid}`}>
-            親の支払い（任意。符・翻の計算過程で子の支払いのちょうど2倍にならないことがあるため、表示機の数値をそのまま入力してください）
-          </label>
-          <input
-            type="number"
-            step="100"
-            name="dealerPoints"
-            id={`dealer-points-input-${uid}`}
-            value={editingHand?.dealerPoints ?? undefined}
-          />
-        </div>
 
         <div id={`dora-field-${uid}`}>
           <label>ドラ（任意）</label>
@@ -422,7 +404,6 @@ function HandLogForm({
             (function () {
               const uid = ${JSON.stringify(uid)};
               const seatNames = ${JSON.stringify(nameBySeat)};
-              const seatByPlayerId = ${JSON.stringify(Object.fromEntries(seatPlayers.map((p) => [p.playerId, p.seatIndex])))};
               const roundSelect = document.getElementById('round-select-' + uid);
               const dealerName = document.getElementById('dealer-name-' + uid);
               function updateDealer() {
@@ -434,10 +415,6 @@ function HandLogForm({
               const targetField = document.getElementById('target-field-' + uid);
               const tenpaiField = document.getElementById('tenpai-field-' + uid);
               const doraField = document.getElementById('dora-field-' + uid);
-              const pointsLabel = document.getElementById('points-label-' + uid);
-              const dealerPointsField = document.getElementById('dealer-points-field-' + uid);
-              const pointsLabelDefault = '点数（任意・役の点数のみ。本場・リーチ棒分は自動計算されます）';
-              const pointsLabelChildTsumo = '子の支払い（1人あたり・任意。符・翻の計算過程で親の支払いのちょうど半分にならないことがあるため、表示機の数値をそのまま入力してください）';
               function updateResultFields() {
                 const checked = document.querySelector('#result-group-' + uid + ' input[name=winType]:checked');
                 const val = checked ? checked.value : 'ron';
@@ -445,21 +422,10 @@ function HandLogForm({
                 targetField.hidden = !(val === 'ron' || val === 'chombo');
                 tenpaiField.hidden = val !== 'draw';
                 doraField.hidden = !(val === 'ron' || val === 'tsumo');
-
-                const winnerChecked = document.querySelector('#winner-field-' + uid + ' input[name=winnerPlayerId]:checked');
-                const winnerSeat = winnerChecked ? seatByPlayerId[winnerChecked.value] : undefined;
-                const dealerSeat = roundSelect.selectedIndex % 4;
-                const isChildTsumo = val === 'tsumo' && winnerSeat !== undefined && winnerSeat !== dealerSeat;
-                dealerPointsField.hidden = !isChildTsumo;
-                pointsLabel.textContent = isChildTsumo ? pointsLabelChildTsumo : pointsLabelDefault;
               }
               document.querySelectorAll('#result-group-' + uid + ' input[name=winType]').forEach((el) => {
                 el.addEventListener('change', updateResultFields);
               });
-              document.querySelectorAll('#winner-field-' + uid + ' input[name=winnerPlayerId]').forEach((el) => {
-                el.addEventListener('change', updateResultFields);
-              });
-              roundSelect.addEventListener('change', updateResultFields);
               updateResultFields();
 
               const yakuBtn = document.getElementById('yaku-btn-' + uid);
@@ -654,8 +620,8 @@ const DayDetailBody = ({
             </table>
 
             {hands.length > 0 && (
-              <details open={!!editingHand}>
-                <summary>局メモ（{hands.length}件）</summary>
+              <>
+                <h4>局メモ</h4>
                 <ul>
                   {hands.map((h) => (
                     <li>
@@ -692,7 +658,7 @@ const DayDetailBody = ({
                     </li>
                   ))}
                 </ul>
-              </details>
+              </>
             )}
 
             {admin && (
@@ -1539,10 +1505,6 @@ function parseHandLogBody(body: { [x: string]: string | File | (string | File)[]
   const honba = Number.isFinite(honbaRaw) && honbaRaw >= 0 ? Math.trunc(honbaRaw) : 0;
   const yakuText = body.yakuText ? String(body.yakuText) : null;
   const points = body.points ? Number(body.points) : null;
-  // 子のツモ時の親の支払い（任意）。親の支払いが子のちょうど2倍にならないケースに対応するための
-  // 追加項目で、ロン・親のツモ・その他の結果種別では無視する（winType==="tsumo"かつ和了者が親でない
-  // 場合のみ意味を持つが、和了者と親の一致判定はcomputeLiveScores側で行うためここでは保存だけする）。
-  const dealerPoints = body.dealerPoints ? Number(body.dealerPoints) : null;
 
   const tenpaiRaw = body.tenpaiPlayerIds;
   const tenpaiPlayerIds = Array.isArray(tenpaiRaw) ? tenpaiRaw : tenpaiRaw ? [tenpaiRaw] : [];
@@ -1566,7 +1528,6 @@ function parseHandLogBody(body: { [x: string]: string | File | (string | File)[]
     honba,
     yakuText,
     points: Number.isFinite(points) ? points : null,
-    dealerPoints: winType === "tsumo" && Number.isFinite(dealerPoints) ? dealerPoints : null,
     tenpaiPlayerIds: winType === "draw" && tenpaiPlayerIds.length > 0 ? JSON.stringify(tenpaiPlayerIds.map(Number)) : null,
     riichiPlayerIds: riichiPlayerIds.length > 0 ? JSON.stringify(riichiPlayerIds.map(Number)) : null,
     nakiPlayerIds: nakiPlayerIds.length > 0 ? JSON.stringify(nakiPlayerIds.map(Number)) : null,

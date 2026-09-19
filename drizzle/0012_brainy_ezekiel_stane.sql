@@ -1,1 +1,0 @@
-ALTER TABLE `hand_logs` ADD `dealer_points` integer;

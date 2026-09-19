@@ -123,13 +123,7 @@ export const handLogs = sqliteTable(
     yakuText: text("yaku_text"),
     // その局の点数（例: 3900, 8000など。任意）。上がった役由来の点数のみを入力する想定で、
     // 本場・リーチ棒分はここに含めない（現在のスコア計算側でhonba・riichiPlayerIdsから自動加算する）。
-    // 子のツモの場合はこの値が「子の支払い額（1人あたり）」を表す（dealerPoints参照）。
     points: integer("points"),
-    // 子のツモ時の「親の支払い額」。符・翻の計算過程で親・子それぞれ独立に100点単位で切り上げるため、
-    // 親の支払いは子の支払い(points)のちょうど2倍にならないことがある（例: 1300/700）。このため
-    // 子のツモに限り、合計から比率で分配するのではなく親・子の支払い額をそれぞれ直接入力してもらう。
-    // ロン・親のツモでは未使用（null）。
-    dealerPoints: integer("dealer_points"),
     // 流局時のテンパイ者（playerIdの配列をJSON文字列として保存。例: "[1,3]"）。任意
     tenpaiPlayerIds: text("tenpai_player_ids"),
     // この局でリーチした人（playerIdの配列をJSON文字列。例: "[1,3]"）。任意。

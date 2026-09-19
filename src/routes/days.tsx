@@ -1008,7 +1008,7 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
       <div class="card">
         <h2>現在のスコア</h2>
         <p style="font-size:0.8rem; color:var(--ink-soft); margin:0 0 10px">
-          この半荘の中だけの暫定合計です（正式なスコアは撮影・確認画面で確定します）。起家を上、そこから時計回りに南家・西家・北家です。
+          この半荘の中だけの暫定合計です（正式なスコアは撮影・確認画面で確定します）。起家を上、そこから時計回りに南家・西家・北家です。25000点持ちからの得点です。
         </p>
         <div class="score-cross">
           {(["top", "right", "bottom", "left"] as const).map((pos, i) => (
@@ -1019,7 +1019,9 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
               </div>
               <div class="score-cross-name">{nameBySeat[i]}</div>
               <div class="score-cross-score">
-                <Signed n={liveScores[i] ?? 0} />
+                <span class={(liveScores[i] ?? 0) >= 0 ? "plus" : "minus"}>
+                  {(ORIGIN_SCORE * 1000 + (liveScores[i] ?? 0)).toLocaleString("ja-JP")}
+                </span>
               </div>
             </div>
           ))}

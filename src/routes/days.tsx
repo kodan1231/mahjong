@@ -18,14 +18,13 @@ import { Signed, TotalsTable, TabBar } from "../views/components";
 import { requireAdmin, isAdmin } from "../lib/auth";
 import {
   computeRankAndChips,
-  normalizeRawScore,
+  roundPointsGosha,
   sumScores,
   ORIGIN_SCORE,
   HAKOWARE_AUTO_THRESHOLD,
   computeLiveScores,
   computeNextRoundState,
   isDealerContinuing,
-  type DisplayMode,
   type LiveHandEntry,
   type RoundProgressEntry,
 } from "../lib/scoring";
@@ -595,7 +594,7 @@ const DayDetailBody = ({
             <h3>
               {isSubtotalBlock ? `小計${s.memo ? `（${s.memo}）` : ""}` : `第${s.seq}半荘`}{" "}
               <span class={`badge ${s.status === "confirmed" ? "badge-confirmed" : "badge-pending"}`}>
-                {s.status === "confirmed" ? "確定済み" : "撮影待ち"}
+                {s.status === "confirmed" ? "確定済み" : "未確定"}
               </span>
             </h3>
             <table class="session-table">
@@ -668,14 +667,9 @@ const DayDetailBody = ({
                     小計ブロックのため個別編集はできません。修正する場合は削除してから「まとめて入力」の小計欄で入力し直してください。
                   </span>
                 ) : s.status === "pending" ? (
-                  <>
-                    <a class="btn" href={`/days/${dayId}/sessions/${s.id}`}>
-                      対局を記録する
-                    </a>
-                    <a class="btn btn-secondary" href={`/days/${dayId}/sessions/${s.id}/capture`}>
-                      点数表示機を撮影する
-                    </a>
-                  </>
+                  <a class="btn" href={`/days/${dayId}/sessions/${s.id}`}>
+                    対局を記録する
+                  </a>
                 ) : (
                   <a class="btn btn-secondary" href={`/days/${dayId}/sessions/${s.id}/confirm`}>
                     点数を編集する
@@ -1000,9 +994,6 @@ dayRoutes.post("/days/:id/sessions", requireAdmin, async (c) => {
   const db = getDb(c.env);
   const body = await c.req.parseBody();
 
-  // 表示形式（素点そのまま／配給原点からの差分）は、対局が終わって点数表示機を実際に
-  // 見るまでどちらなのか分からないため、座席登録の時点では聞かない。撮影・確認画面側で選ぶ。
-  const displayMode: DisplayMode = "raw";
   const seatPlayerIds = [0, 1, 2, 3].map((seat) => Number(body[`seat${seat}`]));
 
   const existingSessions = await db.select().from(gameSessions).where(eq(gameSessions.dayId, dayId));
@@ -1010,7 +1001,7 @@ dayRoutes.post("/days/:id/sessions", requireAdmin, async (c) => {
 
   const [session] = await db
     .insert(gameSessions)
-    .values({ dayId, seq, status: "pending", displayMode })
+    .values({ dayId, seq, status: "pending" })
     .returning({ id: gameSessions.id });
 
   if (session) {
@@ -1078,7 +1069,7 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
       <div class="card">
         <h2>現在のスコア</h2>
         <p style="font-size:0.8rem; color:var(--ink-soft); margin:0 0 10px">
-          この半荘の中だけの暫定合計です（正式なスコアは撮影・確認画面で確定します）。25000点持ちからの得点です。
+          この半荘の中だけの暫定合計です（正式なスコアは確認画面で確定します）。25000点持ちからの得点です。
         </p>
         <table class="session-table">
           <thead>
@@ -1162,90 +1153,12 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
         <div class="card">
           <h2>南4局まで終了しました</h2>
           <p style="display:flex; gap:10px; flex-wrap:wrap">
-            <a class="btn" href={`/days/${dayId}/sessions/${sessionId}/capture`}>
-              点数表示機を撮影する
-            </a>
-            <a class="btn btn-secondary" href={`/days/${dayId}/sessions/${sessionId}/confirm`}>
-              撮影せずに手入力する
+            <a class="btn" href={`/days/${dayId}/sessions/${sessionId}/confirm`}>
+              点数を確定する
             </a>
           </p>
         </div>
       )}
-    </Layout>,
-  );
-});
-
-// ---------- 撮影 ----------
-
-dayRoutes.get("/days/:id/sessions/:sid/capture", requireAdmin, async (c) => {
-  const dayId = Number(c.req.param("id"));
-  const sessionId = Number(c.req.param("sid"));
-  const admin = true;
-  const openDayId = await getOpenDayId(getDb(c.env));
-
-  return c.html(
-    <Layout title="点数表示機を撮影" isAdmin={admin} openDayId={openDayId}>
-      <h1>第{sessionId}半荘: 点数表示機を撮影</h1>
-      <div class="card">
-        <input type="file" id="photo-input" accept="image/*" capture="environment" />
-        <p id="status"></p>
-      </div>
-      <p>
-        <a href={`/days/${dayId}/sessions/${sessionId}/confirm`}>撮影せずに手入力する →</a>
-      </p>
-      <script
-        // eslint-disable-next-line react/no-danger
-        dangerouslySetInnerHTML={{
-          __html: `
-            const MAX_DIMENSION = 1600;
-            const JPEG_QUALITY = 0.85;
-
-            async function resizeImage(file) {
-              const bitmap = await createImageBitmap(file);
-              let { width, height } = bitmap;
-              if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-                const scale = MAX_DIMENSION / Math.max(width, height);
-                width = Math.round(width * scale);
-                height = Math.round(height * scale);
-              }
-              const canvas = document.createElement('canvas');
-              canvas.width = width;
-              canvas.height = height;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(bitmap, 0, 0, width, height);
-              return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));
-            }
-
-            const input = document.getElementById('photo-input');
-            const status = document.getElementById('status');
-            input.addEventListener('change', async () => {
-              const file = input.files[0];
-              if (!file) return;
-
-              status.textContent = '画像を縮小中...';
-              let uploadBlob = file;
-              try {
-                const resized = await resizeImage(file);
-                if (resized) uploadBlob = resized;
-              } catch (e) {
-                // 縮小に失敗しても元画像でアップロードを試みる
-              }
-
-              status.textContent = '解析中...';
-              const fd = new FormData();
-              fd.append('photo', uploadBlob, 'photo.jpg');
-              fd.append('gameSessionId', '${sessionId}');
-              try {
-                const res = await fetch('/api/ocr', { method: 'POST', body: fd });
-                if (!res.ok) throw new Error('failed');
-                window.location.href = '/days/${dayId}/sessions/${sessionId}/confirm';
-              } catch (e) {
-                status.textContent = '解析に失敗しました。手入力してください。';
-              }
-            });
-          `,
-        }}
-      />
     </Layout>,
   );
 });
@@ -1260,13 +1173,14 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
   const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));
   if (!session) return c.notFound();
 
-  const [rows, dayParticipantOptions, latestPhotoRows, hands, openDayId] = await Promise.all([
+  const [rows, dayParticipantOptions, hands, openDayId] = await Promise.all([
     db
       .select({
         seatIndex: sessionScores.seatIndex,
         playerId: sessionScores.playerId,
         name: players.name,
         rawScore: sessionScores.rawScore,
+        rank: sessionScores.rank,
         isHakoware: sessionScores.isHakoware,
       })
       .from(sessionScores)
@@ -1278,20 +1192,11 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
       .from(dayParticipants)
       .innerJoin(players, eq(dayParticipants.playerId, players.id))
       .where(eq(dayParticipants.dayId, dayId)),
-    // imageData（写真BLOB本体）はこの画面では使わない（表示用リンクは/api/photos/:idが別途取得する）ので、
-    // 使うカラムだけ選択して毎回の無駄なBLOB読み込みを避ける。
-    db
-      .select({ id: photoUploads.id, ocrRawJson: photoUploads.ocrRawJson })
-      .from(photoUploads)
-      .where(eq(photoUploads.gameSessionId, sessionId))
-      .orderBy(desc(photoUploads.id))
-      .limit(1),
     db.select().from(handLogs).where(eq(handLogs.gameSessionId, sessionId)).orderBy(asc(handLogs.id)),
     getOpenDayId(db),
   ]);
-  const [latestPhoto] = latestPhotoRows;
 
-  // 対局中ページで局メモから随時計算していた「現在のスコア」を、写真もOCR値も無い場合の
+  // 対局中ページで局メモから随時計算していた「現在のスコア」を、まだ何も保存されていない場合の
   // プリフィルに使う（南4局まで手入力で記録していれば、ここでほぼそのまま確定できる）。
   // 局メモが1件も無い（＝この半荘では対局中ページを使わなかった）場合は0埋めになってしまうと
   // 紛らわしいため、その場合はこのフォールバックを使わない。
@@ -1299,23 +1204,12 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
   const liveScores =
     hands.length > 0 ? computeLiveScores(resolveLiveHandEntries(hands, seatPlayerIdsForLiveScore)) : null;
 
-  let ocrValues: (number | null)[] = [null, null, null, null];
-  if (latestPhoto?.ocrRawJson) {
-    try {
-      ocrValues = JSON.parse(latestPhoto.ocrRawJson).values ?? ocrValues;
-    } catch {
-      // ignore parse errors, keep nulls
-    }
-  }
-
-  // 表示形式（素点そのまま／配給原点からの差分）は座席登録時には決めず、点数表示機を実際に見た
-  // ここ（確認画面）で選んでもらう。?modeクエリで切り替えると、OCRの生の読み取り値からの
-  // プリフィル計算だけがその場でやり直される（すでに入力・保存済みの値はそのまま優先される）。
-  const modeQuery = c.req.query("mode");
-  const displayMode: DisplayMode =
-    modeQuery === "diff" || modeQuery === "raw" ? modeQuery : (session.displayMode as DisplayMode);
   const tieWarning = c.req.query("tie") === "1";
   const badSumWarning = c.req.query("badsum") === "1";
+  const roundMismatchWarning = c.req.query("roundmismatch") === "1";
+  // 丸め不一致の警告では、1位の座席だけ丸め後ポイントを手修正できるようにする
+  // （順位はここに来る前の精密値ベースの判定で既に確定・保存済み）。
+  const rank1PlayerId = rows.find((r) => r.rank === 1)?.playerId ?? null;
 
   return c.html(
     <Layout title="点数を確認" isAdmin={true} openDayId={openDayId}>
@@ -1328,38 +1222,22 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
           同点です。ポイントを調整して同点を解消するか、各座席の「同点時の順位」でどちらが上位かを選び、下のチェックを入れて確定してください。
         </p>
       )}
-      {liveScores && !latestPhoto && (
-        <p style="font-size:0.85rem; color:var(--ink-soft)">
-          写真が無いため、対局中に入力した局メモから計算した暫定スコアを下の欄に入れています。正しければそのまま確定、間違っていれば修正してください。
+      {roundMismatchWarning && (
+        <p class="warning">
+          各自のポイントを集計用に丸めた結果、4人分の合計が0になりませんでした。1位の欄を手で調整して合計0にしてから確定してください。
         </p>
       )}
-      <p>
-        点数表示機の表示形式:{" "}
-        <a href={`/days/${dayId}/sessions/${sessionId}/confirm?mode=raw`} style={displayMode === "raw" ? "font-weight:900; text-decoration:underline" : ""}>
-          素点をそのまま表示
-        </a>
-        {" ／ "}
-        <a href={`/days/${dayId}/sessions/${sessionId}/confirm?mode=diff`} style={displayMode === "diff" ? "font-weight:900; text-decoration:underline" : ""}>
-          配給原点({ORIGIN_SCORE})からの±差分表示
-        </a>
-        <br />
-        （実際に表示機を見て、どちらの形式で数字が出ているかを選んでください。下の入力欄にはその形式に合わせて配給原点からの増減が自動計算されて入ります。4人の合計は必ず0になります）
-        {latestPhoto && (
-          <>
-            {" ／ "}
-            <a href={`/api/photos/${latestPhoto.id}`} target="_blank" rel="noreferrer">
-              撮影した写真を見る
-            </a>
-          </>
-        )}
-      </p>
+      {liveScores && !rows.some((r) => r.rawScore != null) && (
+        <p style="font-size:0.85rem; color:var(--ink-soft)">
+          対局中に入力した局メモから計算した暫定スコアを下の欄に入れています。正しければそのまま確定、間違っていれば修正してください。
+        </p>
+      )}
       <div class="card">
       <form class="stack" method="post" action={`/days/${dayId}/sessions/${sessionId}/confirm`}>
         {rows.map((r) => {
-          const ocrRaw = ocrValues[r.seatIndex];
           const liveScore = liveScores ? liveScores[r.seatIndex]! / 1000 : null;
-          const prefill =
-            r.rawScore ?? (ocrRaw != null ? normalizeRawScore(ocrRaw, displayMode) : (liveScore ?? ""));
+          const prefill = r.rawScore ?? (liveScore ?? "");
+          const roundedPoint = r.rawScore != null ? roundPointsGosha(r.rawScore) : null;
           return (
             <div class="seat-block">
               <div class="seat-row">
@@ -1395,6 +1273,18 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
                         </option>
                       ))}
                     </select>
+                  </label>
+                </div>
+              )}
+              {roundMismatchWarning && roundedPoint != null && (
+                <div class="seat-row">
+                  <label style="font-weight:normal">
+                    集計用ポイント（丸め後）:{" "}
+                    {r.playerId === rank1PlayerId ? (
+                      <input type="number" step="1" name={`roundedOverride_${r.playerId}`} value={roundedPoint} style="width:5em" />
+                    ) : (
+                      <strong>{roundedPoint}</strong>
+                    )}
                   </label>
                 </div>
               )}
@@ -1457,13 +1347,46 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
     return c.redirect(`/days/${dayId}/sessions/${sessionId}/confirm?tie=1`);
   }
 
+  // 日別/年度別/通算の集計では、精密なポイント（100点単位）ではなく五捨六入した整数ポイント
+  // （1000点単位）を使う。各自を独立に丸めるため4人分の合計が0からずれることがあり、
+  // その場合は1位の丸め後ポイントを手修正してもらう（roundedOverride_<playerId>）。
+  // 順位・チップは常に丸め前の精密な値（ranked）で決まっており、ここでは変わらない。
+  const rank1PlayerId = ranked.find((r) => r.rank === 1)?.playerId ?? null;
+  const roundedPoints = new Map(
+    seatInputs.map((s) => {
+      if (s.playerId === rank1PlayerId && body[`roundedOverride_${s.playerId}`] != null) {
+        return [s.playerId, Number(body[`roundedOverride_${s.playerId}`])] as const;
+      }
+      return [s.playerId, roundPointsGosha(s.rawScore)] as const;
+    }),
+  );
+  const roundedSum = [...roundedPoints.values()].reduce((sum, v) => sum + v, 0);
+
+  if (roundedSum !== 0) {
+    // 精密値ベースの順位・チップは確定させ、丸め後ポイントの調整だけ確認画面に戻して待つ。
+    for (const s of seatInputs) {
+      const r = ranked.find((x) => x.playerId === s.playerId);
+      await db
+        .update(sessionScores)
+        .set({
+          playerId: s.playerId,
+          rawScore: s.rawScore,
+          rank: r?.rank ?? null,
+          rankChip: r?.rankChip ?? null,
+          isHakoware: s.isHakoware,
+        })
+        .where(and(eq(sessionScores.gameSessionId, sessionId), eq(sessionScores.seatIndex, s.seatIndex)));
+    }
+    return c.redirect(`/days/${dayId}/sessions/${sessionId}/confirm?roundmismatch=1`);
+  }
+
   for (const s of seatInputs) {
     const r = ranked.find((x) => x.playerId === s.playerId);
     await db
       .update(sessionScores)
       .set({
         playerId: s.playerId,
-        rawScore: s.rawScore,
+        rawScore: roundedPoints.get(s.playerId) ?? 0,
         rank: r?.rank ?? null,
         rankChip: r?.rankChip ?? null,
         isHakoware: s.isHakoware,
@@ -1748,7 +1671,7 @@ dayRoutes.post("/days/:id/edit", requireAdmin, async (c) => {
 });
 
 // ---------- まとめて入力（スプレッドシート風の一括登録・過去履歴のバックフィル向け） ----------
-// 半荘ごとの座席登録→撮影→確認、という通常フローとは別に、
+// 半荘ごとの座席登録→局メモ入力→確認、という通常フローとは別に、
 // 「行＝半荘、列＝参加者」の表に直接ポイント（素点÷1000）を入力して一括保存できる画面。
 // 箱割れ・役満・局メモはここでは扱わず、通常の対局日詳細ページから編集する。
 
@@ -2124,7 +2047,7 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
       if (!session) {
         const [inserted] = await db
           .insert(gameSessions)
-          .values({ dayId, seq, status: "pending", displayMode: "raw" })
+          .values({ dayId, seq, status: "pending" })
           .returning();
         session = inserted;
       }
@@ -2148,7 +2071,7 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
     if (!session) {
       const [inserted] = await db
         .insert(gameSessions)
-        .values({ dayId, seq, status: "confirmed", displayMode: "raw", playedAt: new Date().toISOString() })
+        .values({ dayId, seq, status: "confirmed", playedAt: new Date().toISOString() })
         .returning();
       session = inserted;
     } else {
@@ -2252,7 +2175,6 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
         dayId,
         seq,
         status: "confirmed",
-        displayMode: "raw",
         playedAt: new Date().toISOString(),
         memo: label || null,
       })

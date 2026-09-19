@@ -17,23 +17,22 @@ export const HAKOWARE_AUTO_THRESHOLD = -31;
 // 着順ごとの固定チップ (1位+3 / 2位0 / 3位-1 / 4位-2)
 const RANK_CHIP_TABLE: Record<number, number> = { 1: 3, 2: 0, 3: -1, 4: -2 };
 
-export type DisplayMode = "raw" | "diff";
-
 /**
- * 点数表示機のOCR値を「配給原点からの差分（ポイント）」に正規化する。
- * - rawモード（素点そのまま表示）: 表示されている数値は素点の絶対値（例: 32000）なので、
- *   1000で割ってポイント化してから配給原点(origin)を引き、差分に変換する
- *   （32000 → 32ポイント → 32-25 = +7）。麻雀の素点は100点単位で丸められるため
- *   小数第1位までに丸める。
- * - diffモード（配給原点からの±差分表示）: 表示されている数値（例: "+7"）が既に
- *   差分そのものなので、変換は不要でそのまま使う。
+ * 半荘確定時、手入力された精密なポイント（0.1刻み＝素点100点単位）を、日別/年度別/通算の
+ * 集計で使う整数ポイント（1000点単位）に変換する。「五捨六入」（小数第1位が0〜5なら切り捨て、
+ * 6〜9なら切り上げ。通常の四捨五入と異なりちょうど5は切り捨てる）で丸める。
+ * 例: +7.7 → +8 / -0.3 → 0 / -7.1 → -7 / +2.7 → +3。
+ * 順位・チップ・4人合計0チェックは常にこの丸め前の精密な値で行う（このポイント自体は
+ * 順位に関与しない）。丸め後の4人分の合計が0にならないことがある（丸め誤差。100点単位の
+ * 精密値は必ず合計0になるが、各自を独立に丸めるとずれうるため）ので、確定時に別途チェックし、
+ * ずれていれば1位の丸め後ポイントを手修正してもらう。
  */
-export function normalizeRawScore(
-  ocrValue: number,
-  displayMode: DisplayMode,
-  origin: number = ORIGIN_SCORE,
-): number {
-  return displayMode === "diff" ? ocrValue : Math.round(ocrValue / 100) / 10 - origin;
+export function roundPointsGosha(points: number): number {
+  const tenths = Math.round(points * 10);
+  const whole = Math.trunc(tenths / 10);
+  const remainder = Math.abs(tenths - whole * 10);
+  // whole自体は-0.x〜0.xの入力でMath.trunc(-0)=-0になりうるため、+0で正規化する。
+  return (remainder <= 5 ? whole : whole + Math.sign(tenths)) + 0;
 }
 
 export interface PlayerScore {

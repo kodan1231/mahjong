@@ -9,8 +9,5 @@ database_name = "mahjong-db"
 database_id = "91a51075-b771-416c-a277-4ba8dc4538cd"
 migrations_dir = "drizzle"
 
-[ai]
-binding = "AI"
-
 [vars]
 APP_TIMEZONE = "Asia/Tokyo"

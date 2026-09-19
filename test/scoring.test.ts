@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  normalizeRawScore,
+  roundPointsGosha,
   computeRankAndChips,
   computeYakumanChips,
   sumScores,
@@ -11,19 +11,30 @@ import {
 // アプリ全体で保存・集計する点数の単位は「ポイント」＝配給原点(25000点=25ポイント)からの
 // 増減（差分）。例: 最終所持点32000点なら+7ポイント。1半荘の4人分は必ず合計0になる。
 
-describe("normalizeRawScore", () => {
-  it("rawモード: 素点（画面に表示された絶対値）を1000で割ってから配給原点を引き、差分に変換する", () => {
-    expect(normalizeRawScore(32000, "raw")).toBe(7); // 32000/1000 - 25 = 7
-    expect(normalizeRawScore(24700, "raw")).toBeCloseTo(-0.3, 5); // 24.7 - 25
+describe("roundPointsGosha", () => {
+  it("小数第1位が6〜9なら切り上げる", () => {
+    expect(roundPointsGosha(7.7)).toBe(8);
+    expect(roundPointsGosha(2.7)).toBe(3);
+    expect(roundPointsGosha(0.6)).toBe(1);
   });
 
-  it("diffモード: 表示値は既に配給原点からの差分そのものなので、変換不要でそのまま使う", () => {
-    expect(normalizeRawScore(7, "diff")).toBe(7);
-    expect(normalizeRawScore(-3.5, "diff")).toBe(-3.5);
+  it("小数第1位が0〜5なら切り捨てる（通常の四捨五入と異なりちょうど5も切り捨て）", () => {
+    expect(roundPointsGosha(-0.3)).toBe(0);
+    expect(roundPointsGosha(-7.1)).toBe(-7);
+    expect(roundPointsGosha(0.5)).toBe(0);
+    expect(roundPointsGosha(-0.5)).toBe(0);
   });
 
-  it("supports a custom origin for raw mode", () => {
-    expect(normalizeRawScore(35000, "raw", 30)).toBe(5); // 35 - 30
+  it("整数はそのまま返す", () => {
+    expect(roundPointsGosha(5)).toBe(5);
+    expect(roundPointsGosha(0)).toBe(0);
+    expect(roundPointsGosha(-3)).toBe(-3);
+  });
+
+  it("四人分を独立に丸めると合計が0からずれることがある（丸め誤差の実例）", () => {
+    const rounded = [7.7, -0.3, -0.3, -7.1].map(roundPointsGosha);
+    expect(rounded).toEqual([8, 0, 0, -7]);
+    expect(rounded.reduce((a, b) => a + b, 0)).toBe(1); // 0にならない＝確定時に手修正が必要になるケース
   });
 });
 

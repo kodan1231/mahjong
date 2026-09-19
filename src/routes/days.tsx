@@ -1260,7 +1260,7 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
   const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));
   if (!session) return c.notFound();
 
-  const [rows, dayParticipantOptions, latestPhotoRows, openDayId] = await Promise.all([
+  const [rows, dayParticipantOptions, latestPhotoRows, hands, openDayId] = await Promise.all([
     db
       .select({
         seatIndex: sessionScores.seatIndex,
@@ -1286,9 +1286,18 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
       .where(eq(photoUploads.gameSessionId, sessionId))
       .orderBy(desc(photoUploads.id))
       .limit(1),
+    db.select().from(handLogs).where(eq(handLogs.gameSessionId, sessionId)).orderBy(asc(handLogs.id)),
     getOpenDayId(db),
   ]);
   const [latestPhoto] = latestPhotoRows;
+
+  // 対局中ページで局メモから随時計算していた「現在のスコア」を、写真もOCR値も無い場合の
+  // プリフィルに使う（南4局まで手入力で記録していれば、ここでほぼそのまま確定できる）。
+  // 局メモが1件も無い（＝この半荘では対局中ページを使わなかった）場合は0埋めになってしまうと
+  // 紛らわしいため、その場合はこのフォールバックを使わない。
+  const seatPlayerIdsForLiveScore = [0, 1, 2, 3].map((i) => rows.find((r) => r.seatIndex === i)?.playerId ?? null);
+  const liveScores =
+    hands.length > 0 ? computeLiveScores(resolveLiveHandEntries(hands, seatPlayerIdsForLiveScore)) : null;
 
   let ocrValues: (number | null)[] = [null, null, null, null];
   if (latestPhoto?.ocrRawJson) {
@@ -1319,6 +1328,11 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
           同点です。ポイントを調整して同点を解消するか、各座席の「同点時の順位」でどちらが上位かを選び、下のチェックを入れて確定してください。
         </p>
       )}
+      {liveScores && !latestPhoto && (
+        <p style="font-size:0.85rem; color:var(--ink-soft)">
+          写真が無いため、対局中に入力した局メモから計算した暫定スコアを下の欄に入れています。正しければそのまま確定、間違っていれば修正してください。
+        </p>
+      )}
       <p>
         点数表示機の表示形式:{" "}
         <a href={`/days/${dayId}/sessions/${sessionId}/confirm?mode=raw`} style={displayMode === "raw" ? "font-weight:900; text-decoration:underline" : ""}>
@@ -1343,8 +1357,9 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
       <form class="stack" method="post" action={`/days/${dayId}/sessions/${sessionId}/confirm`}>
         {rows.map((r) => {
           const ocrRaw = ocrValues[r.seatIndex];
+          const liveScore = liveScores ? liveScores[r.seatIndex]! / 1000 : null;
           const prefill =
-            r.rawScore ?? (ocrRaw != null ? normalizeRawScore(ocrRaw, displayMode) : "");
+            r.rawScore ?? (ocrRaw != null ? normalizeRawScore(ocrRaw, displayMode) : (liveScore ?? ""));
           return (
             <div class="seat-block">
               <div class="seat-row">

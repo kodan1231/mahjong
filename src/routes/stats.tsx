@@ -306,39 +306,27 @@ statsRoutes.get("/players/:id", async (c) => {
                 <tbody>
                   <tr>
                     <td>上がり率</td>
-                    <td>
-                      {fmtPercent(traits.winRate)}（{traits.winCount}局）
-                    </td>
+                    <td>{fmtPercent(traits.winRate)}</td>
                   </tr>
                   <tr>
                     <td>振り込み率</td>
-                    <td>
-                      {fmtPercent(traits.dealInRate)}（{traits.dealInCount}局）
-                    </td>
+                    <td>{fmtPercent(traits.dealInRate)}</td>
                   </tr>
                   <tr>
                     <td>リーチ率</td>
-                    <td>
-                      {fmtPercent(traits.riichiRate)}（{traits.riichiCount}局）
-                    </td>
+                    <td>{fmtPercent(traits.riichiRate)}</td>
                   </tr>
                   <tr>
                     <td>鳴き率</td>
-                    <td>
-                      {fmtPercent(traits.nakiRate)}（{traits.nakiCount}局）
-                    </td>
+                    <td>{fmtPercent(traits.nakiRate)}</td>
                   </tr>
                   <tr>
                     <td>自摸率</td>
-                    <td>
-                      {fmtPercent(traits.tsumoRate)}（{traits.tsumoCount}／和了{traits.winCount}局）
-                    </td>
+                    <td>{fmtPercent(traits.tsumoRate)}</td>
                   </tr>
                   <tr>
                     <td>一発率</td>
-                    <td>
-                      {fmtPercent(traits.ippatsuRate)}（{traits.ippatsuCount}／立直{traits.riichiCount}局）
-                    </td>
+                    <td>{fmtPercent(traits.ippatsuRate)}</td>
                   </tr>
                   <tr>
                     <td>平均上がり点数</td>

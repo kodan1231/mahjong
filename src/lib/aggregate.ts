@@ -588,10 +588,17 @@ export async function computePlayerTraits(db: Db, playerId: number): Promise<Pla
   const sessionIds = [...new Set(seatedSessions.map((s) => s.gameSessionId))];
   if (sessionIds.length === 0) return empty;
 
+  // inArray(column, sessionIds)のようにJSの配列をそのまま渡すと、対局数が多いプレイヤーでは
+  // バインド変数の数がD1のSQL変数上限を超え「D1_ERROR: too many SQL variables」になる
+  // （もつさん・支店長は対局数が100件超で発生。2026-09-19に実データで発覚・修正）。
+  // サブクエリを渡す形にするとバインド変数は1個で済み、対局数に関わらず安全になる。
+  const seatedSessionIdSubquery = () =>
+    db.select({ id: sessionScores.gameSessionId }).from(sessionScores).where(eq(sessionScores.playerId, playerId));
+
   const handRows = await db
     .select()
     .from(handLogs)
-    .where(inArray(handLogs.gameSessionId, sessionIds))
+    .where(inArray(handLogs.gameSessionId, seatedSessionIdSubquery()))
     .orderBy(asc(handLogs.gameSessionId), asc(handLogs.id));
   // チョンボは同じ局をやり直す扱いなので、参加局数・各種比率の対象から除く。
   const countedHands = handRows.filter((h) => h.winType !== "chombo");
@@ -622,7 +629,7 @@ export async function computePlayerTraits(db: Db, playerId: number): Promise<Pla
       playerId: sessionScores.playerId,
     })
     .from(sessionScores)
-    .where(inArray(sessionScores.gameSessionId, sessionIds));
+    .where(inArray(sessionScores.gameSessionId, seatedSessionIdSubquery()));
   const seatMapBySession = new Map<number, Map<number, number>>();
   for (const row of seatRows) {
     if (!seatMapBySession.has(row.gameSessionId)) seatMapBySession.set(row.gameSessionId, new Map());

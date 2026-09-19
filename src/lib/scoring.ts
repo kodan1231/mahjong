@@ -103,6 +103,8 @@ export interface LiveHandEntry {
   honba: number;
   /** この局でリーチした人の座席一覧。宣言した時点で即座に-1000し、場のリーチ棒として積み立てる */
   riichiSeats: number[];
+  /** 流局時のテンパイ者の座席一覧。流局以外では無視される */
+  tenpaiSeats: number[];
 }
 
 /**
@@ -118,7 +120,9 @@ export interface LiveHandEntry {
  * - ツモ: pointsには和了者が受け取る「役由来の合計」を入力してもらう前提で、親かどうかに応じた比率
  *   （親のツモは3人が均等払い、子のツモは親が半分・残り2人が1/4ずつ）で各家の支払い額を求め、
  *   本場分（3人均等）を上乗せする
- * - 流局: 素点の授受は無いが、リーチ供託だけは反映する
+ * - 流局: リーチ供託に加え、テンパイ料（ノーテン罰符）合計3000点をテンパイ者に均等分配し、
+ *   ノーテン者から均等に徴収する（テンパイ1人:+3000/他-1000ずつ、2人:各+1500/各-1500、
+ *   3人:各+1000/-3000、0人・4人:授受なし）
  * - チョンボ: 同じ局をやり直す扱いのため、リーチ供託も含めこのスコアには一切反映しない
  */
 export function computeLiveScores(hands: LiveHandEntry[]): number[] {
@@ -137,6 +141,18 @@ export function computeLiveScores(hands: LiveHandEntry[]): number[] {
     if (isWin) {
       scores[h.winnerSeat!]! += stickPool * 1000;
       stickPool = 0;
+    }
+
+    if (h.winType === "draw") {
+      const tenpaiCount = h.tenpaiSeats.length;
+      if (tenpaiCount > 0 && tenpaiCount < 4) {
+        const perTenpai = 3000 / tenpaiCount;
+        const perNoten = 3000 / (4 - tenpaiCount);
+        for (let seat = 0; seat < 4; seat++) {
+          scores[seat]! += h.tenpaiSeats.includes(seat) ? perTenpai : -perNoten;
+        }
+      }
+      continue;
     }
 
     if (h.points == null) continue;
@@ -180,9 +196,9 @@ export interface RoundProgressEntry {
 }
 
 /**
- * その局の結果から、親が続投する（連荘＝次も同じ局・本場+1になる）かどうかを判定する。
+ * その局の結果から、親が続投する（連荘＝次も同じ局になる）かどうかを判定する。
  * 親が和了、または流局で親がテンパイのときに続投。それ以外（親以外の和了、流局で親が非テンパイ）は
- * 親が交代し、次は局が進んで本場は0に戻る。
+ * 親が交代する。
  */
 export function isDealerContinuing(hand: RoundProgressEntry): boolean {
   return (
@@ -195,6 +211,9 @@ export function isDealerContinuing(hand: RoundProgressEntry): boolean {
  * 局メモの入力フォームに出す「次の局・本場」の初期値を、直近の履歴から提案する。
  * チョンボは同じ局をやり直す扱いなので判定対象から除外する。履歴が無ければ東1局0本場から開始する。
  * あくまでフォームの初期値の提案であり、実際に保存される値は入力時点の手修正を反映したものになる。
+ * 本場は「親が続投」または「流局」なら+1で継続し、それ以外（親以外の和了）で0に戻る。
+ * 親が交代するかどうか（流局で親が非テンパイの場合を含む）とは独立に判定する点に注意
+ * （流局は親交代の有無に関わらず本場が必ず+1で継続するため）。
  */
 export function computeNextRoundState(
   hands: RoundProgressEntry[],
@@ -204,10 +223,9 @@ export function computeNextRoundState(
   const last = relevant[relevant.length - 1];
   if (!last) return { roundIndex: 0, honba: 0 };
 
-  if (isDealerContinuing(last)) {
-    return { roundIndex: last.roundIndex, honba: last.honba + 1 };
-  }
-  return { roundIndex: Math.min(last.roundIndex + 1, maxRoundIndex), honba: 0 };
+  const roundIndex = isDealerContinuing(last) ? last.roundIndex : Math.min(last.roundIndex + 1, maxRoundIndex);
+  const honba = last.winType === "draw" || isDealerContinuing(last) ? last.honba + 1 : 0;
+  return { roundIndex, honba };
 }
 
 export interface YakumanChipResult {

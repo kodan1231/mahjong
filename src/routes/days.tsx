@@ -58,6 +58,7 @@ function resolveLiveHandEntries(
     roundLabel: string | null;
     honba: number;
     riichiPlayerIds: string | null;
+    tenpaiPlayerIds: string | null;
   }[],
   seatPlayerIds: (number | null)[],
 ): LiveHandEntry[] {
@@ -66,17 +67,18 @@ function resolveLiveHandEntries(
     if (pid != null) seatOfPlayer.set(pid, seat);
   });
 
+  const resolveSeats = (json: string | null): number[] => {
+    if (!json) return [];
+    try {
+      const ids: number[] = JSON.parse(json);
+      return ids.map((id) => seatOfPlayer.get(id)).filter((s): s is number => s != null);
+    } catch {
+      return [];
+    }
+  };
+
   return hands.map((h) => {
     const roundIndex = h.roundLabel ? ROUND_OPTIONS.indexOf(h.roundLabel as (typeof ROUND_OPTIONS)[number]) : -1;
-    let riichiSeats: number[] = [];
-    if (h.riichiPlayerIds) {
-      try {
-        const ids: number[] = JSON.parse(h.riichiPlayerIds);
-        riichiSeats = ids.map((id) => seatOfPlayer.get(id)).filter((s): s is number => s != null);
-      } catch {
-        // ignore parse errors, treat as no riichi info
-      }
-    }
     return {
       winType: h.winType,
       winnerSeat: h.winnerPlayerId != null ? (seatOfPlayer.get(h.winnerPlayerId) ?? null) : null,
@@ -84,7 +86,8 @@ function resolveLiveHandEntries(
       dealerSeat: roundIndex >= 0 ? roundIndex % 4 : null,
       points: h.points,
       honba: h.honba,
-      riichiSeats,
+      riichiSeats: resolveSeats(h.riichiPlayerIds),
+      tenpaiSeats: resolveSeats(h.tenpaiPlayerIds),
     };
   });
 }

@@ -620,8 +620,8 @@ const DayDetailBody = ({
             </table>
 
             {hands.length > 0 && (
-              <>
-                <h4>局メモ</h4>
+              <details open={!!editingHand}>
+                <summary>局メモ（{hands.length}件）</summary>
                 <ul>
                   {hands.map((h) => (
                     <li>
@@ -658,7 +658,7 @@ const DayDetailBody = ({
                     </li>
                   ))}
                 </ul>
-              </>
+              </details>
             )}
 
             {admin && (

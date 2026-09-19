@@ -22,6 +22,7 @@ import {
   sumScores,
   ORIGIN_SCORE,
   HAKOWARE_AUTO_THRESHOLD,
+  ROUND_OPTIONS,
   computeLiveScores,
   computeNextRoundState,
   isDealerContinuing,
@@ -40,10 +41,6 @@ export const dayRoutes = new Hono<{ Bindings: Env }>();
 const WIND_LABELS = ["起家", "南家", "西家", "北家"] as const;
 // 半荘一覧の表は幅が狭いスマホでも1段に収まるよう、風は1文字表記にする
 const WIND_SHORT_LABELS = ["東", "南", "西", "北"] as const;
-
-// 半荘＝東1〜4局＋南1〜4局の8局。インデックス%4が起家からの席順（＝その局の親）に対応する
-// （東1局と南1局はどちらも起家が親、というように東場・南場で同じ並びが繰り返されるため）。
-const ROUND_OPTIONS = ["東1局", "東2局", "東3局", "東4局", "南1局", "南2局", "南3局", "南4局"] as const;
 
 // hand_logsの生データ（playerId/roundLabel）を、computeLiveScores（src/lib/scoring.ts）が
 // 求める座席インデックス基準の形に変換してから渡す。座標変換とラベル解決はこの画面固有の

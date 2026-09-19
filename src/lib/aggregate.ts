@@ -1,4 +1,4 @@
-import { eq, and, gte, lt, inArray, desc, sql } from "drizzle-orm";
+import { eq, and, gte, lt, inArray, desc, asc, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   players,
@@ -10,7 +10,7 @@ import {
   yakumanEventTargets,
   handLogs,
 } from "../db/schema";
-import { computeYakumanChips } from "./scoring";
+import { computeYakumanChips, ROUND_OPTIONS } from "./scoring";
 
 export interface PlayerTotal {
   playerId: number;
@@ -497,6 +497,12 @@ export interface PlayerTraits {
   nakiRate: number;
   dealInCount: number;
   dealInRate: number;
+  /** 自摸和了数。自摸率は和了数（winCount）に対する比率 */
+  tsumoCount: number;
+  tsumoRate: number;
+  /** 立直後、一発で和了した回数。一発率は立直回数（riichiCount）に対する比率 */
+  ippatsuCount: number;
+  ippatsuRate: number;
   /** 平均上がり点数（役の点数のみ。本場・リーチ棒分は含まない）。点数未入力の和了は除いて平均する */
   avgWinPoints: number | null;
   yakuBreakdown: YakuBreakdownEntry[];
@@ -505,6 +511,11 @@ export interface PlayerTraits {
   avgOmoteDora: number | null;
   avgUraDora: number | null;
   avgAkaDora: number | null;
+  /** 親を務めた回（連荘した本場も含めた一続きの親番）ごとの連荘回数（0=即流れ）の平均。
+   * 親番が一度も無ければnull */
+  avgDealerRenchan: number | null;
+  /** 平均の分母となった親番の回数 */
+  dealerTurnCount: number;
 }
 
 function parsePlayerIdList(json: string | null): number[] {
@@ -532,11 +543,18 @@ export function normalizeYakuName(name: string): string {
 }
 
 /**
- * 個人ページ「特性」タブ用の各種指標（上がり率・リーチ率・鳴き率・振り込み率・平均上がり点数・
- * 得意役・上がり役別比率・表/裏/赤ドラ平均数）。分母となる「参加局数」はこのプレイヤーが座席に
- * 入っていた半荘のhand_logs件数（チョンボは同じ局のやり直し扱いのため除く）。
- * リーチ・鳴き・ドラ・役はいずれも任意入力項目のため、入力されていない局は「無かった」として
- * 分母に含めたまま扱う（＝運用初期は入力漏れの分だけ控えめな数字になりうる）。
+ * 個人ページ「特性」タブ用の各種指標（上がり率・リーチ率・鳴き率・振り込み率・自摸率・一発率・
+ * 平均上がり点数・得意役・上がり役別比率・表/裏/赤ドラ平均数・親での平均連荘回数）。分母となる
+ * 「参加局数」はこのプレイヤーが座席に入っていた半荘のhand_logs件数（チョンボは同じ局のやり直し
+ * 扱いのため除く）。リーチ・鳴き・ドラ・役はいずれも任意入力項目のため、入力されていない局は
+ * 「無かった」として分母に含めたまま扱う（＝運用初期は入力漏れの分だけ控えめな数字になりうる）。
+ * 自摸率は和了数に対する自摸和了の比率、一発率は立直回数に対する一発和了の比率
+ * （tenhou等の集計サイトに倣った定義。門前ロン/ツモ回数を分母にしているわけではない）。
+ * 親での平均連荘回数はhand_logsのroundLabelをROUND_OPTIONS（src/lib/scoring.ts）と突き合わせて
+ * その局の親の座席を求め、session_scoresの座席からこのプレイヤーが親だった一続きの親番
+ * （roundLabelが変わらない間＝連荘中）を特定し、その親番が終わった時点の本場数（=連荘した回数、
+ * 0なら即流れ）を親番ごとに平均したもの。roundLabelがROUND_OPTIONSと一致しない行（通常発生しない）
+ * は判定対象から除く。
  */
 export async function computePlayerTraits(db: Db, playerId: number): Promise<PlayerTraits> {
   const empty: PlayerTraits = {
@@ -549,12 +567,18 @@ export async function computePlayerTraits(db: Db, playerId: number): Promise<Pla
     nakiRate: 0,
     dealInCount: 0,
     dealInRate: 0,
+    tsumoCount: 0,
+    tsumoRate: 0,
+    ippatsuCount: 0,
+    ippatsuRate: 0,
     avgWinPoints: null,
     yakuBreakdown: [],
     favoriteYaku: [],
     avgOmoteDora: null,
     avgUraDora: null,
     avgAkaDora: null,
+    avgDealerRenchan: null,
+    dealerTurnCount: 0,
   };
 
   const seatedSessions = await db
@@ -564,7 +588,11 @@ export async function computePlayerTraits(db: Db, playerId: number): Promise<Pla
   const sessionIds = [...new Set(seatedSessions.map((s) => s.gameSessionId))];
   if (sessionIds.length === 0) return empty;
 
-  const handRows = await db.select().from(handLogs).where(inArray(handLogs.gameSessionId, sessionIds));
+  const handRows = await db
+    .select()
+    .from(handLogs)
+    .where(inArray(handLogs.gameSessionId, sessionIds))
+    .orderBy(asc(handLogs.gameSessionId), asc(handLogs.id));
   // チョンボは同じ局をやり直す扱いなので、参加局数・各種比率の対象から除く。
   const countedHands = handRows.filter((h) => h.winType !== "chombo");
   const handCount = countedHands.length;
@@ -577,6 +605,58 @@ export async function computePlayerTraits(db: Db, playerId: number): Promise<Pla
   const riichiCount = countedHands.filter((h) => parsePlayerIdList(h.riichiPlayerIds).includes(playerId)).length;
   const nakiCount = countedHands.filter((h) => parsePlayerIdList(h.nakiPlayerIds).includes(playerId)).length;
   const dealInCount = countedHands.filter((h) => h.winType === "ron" && h.loserPlayerId === playerId).length;
+  const tsumoCount = winHands.filter((h) => h.winType === "tsumo").length;
+  // 一発率はtenhou等の集計サイトに倣い「立直した回数」を分母にする（門前でロン/ツモした回数ではない）。
+  // このプレイヤーが立直した局のうち、そのまま自身が「一発」役付きで和了した回数を数える。
+  const ippatsuCount = countedHands.filter(
+    (h) =>
+      h.winnerPlayerId === playerId &&
+      parsePlayerIdList(h.riichiPlayerIds).includes(playerId) &&
+      (h.yakuText ?? "").split("、").some((name) => name.trim() === "一発"),
+  ).length;
+
+  const seatRows = await db
+    .select({
+      gameSessionId: sessionScores.gameSessionId,
+      seatIndex: sessionScores.seatIndex,
+      playerId: sessionScores.playerId,
+    })
+    .from(sessionScores)
+    .where(inArray(sessionScores.gameSessionId, sessionIds));
+  const seatMapBySession = new Map<number, Map<number, number>>();
+  for (const row of seatRows) {
+    if (!seatMapBySession.has(row.gameSessionId)) seatMapBySession.set(row.gameSessionId, new Map());
+    seatMapBySession.get(row.gameSessionId)!.set(row.seatIndex, row.playerId);
+  }
+
+  // 親番ごとの連荘回数（本場が0に戻らず続いた回数）を集計する。roundLabelが変わらない
+  // （＝親が続投した）限り同じ親番として扱い、続投が終わった時点の本場数をその親番の
+  // 連荘回数として確定する。roundLabelがROUND_OPTIONSと一致しない行は判定対象から除く。
+  const dealerRenchanCounts: number[] = [];
+  let currentSessionId: number | null = null;
+  let currentRoundLabel: string | null = null;
+  let currentDealerPlayerId: number | null = null;
+  let currentMaxHonba = 0;
+
+  const closeDealerTurn = () => {
+    if (currentDealerPlayerId === playerId) dealerRenchanCounts.push(currentMaxHonba);
+  };
+
+  for (const h of countedHands) {
+    const roundIndex = h.roundLabel ? ROUND_OPTIONS.indexOf(h.roundLabel as (typeof ROUND_OPTIONS)[number]) : -1;
+    if (roundIndex < 0) continue;
+    const isSameTurn = h.gameSessionId === currentSessionId && h.roundLabel === currentRoundLabel;
+    if (!isSameTurn) {
+      if (currentSessionId != null) closeDealerTurn();
+      currentSessionId = h.gameSessionId;
+      currentRoundLabel = h.roundLabel;
+      currentDealerPlayerId = seatMapBySession.get(h.gameSessionId)?.get(roundIndex % 4) ?? null;
+      currentMaxHonba = h.honba;
+    } else {
+      currentMaxHonba = Math.max(currentMaxHonba, h.honba);
+    }
+  }
+  if (currentSessionId != null) closeDealerTurn();
 
   const avgWinPoints = average(winHands.filter((h) => h.points != null).map((h) => h.points!));
   const avgOmoteDora = average(winHands.filter((h) => h.omoteDoraCount != null).map((h) => h.omoteDoraCount!));
@@ -608,11 +688,17 @@ export async function computePlayerTraits(db: Db, playerId: number): Promise<Pla
     nakiRate: handCount > 0 ? nakiCount / handCount : 0,
     dealInCount,
     dealInRate: handCount > 0 ? dealInCount / handCount : 0,
+    tsumoCount,
+    tsumoRate: winCount > 0 ? tsumoCount / winCount : 0,
+    ippatsuCount,
+    ippatsuRate: riichiCount > 0 ? ippatsuCount / riichiCount : 0,
     avgWinPoints,
     yakuBreakdown,
     favoriteYaku,
     avgOmoteDora,
     avgUraDora,
     avgAkaDora,
+    avgDealerRenchan: average(dealerRenchanCounts),
+    dealerTurnCount: dealerRenchanCounts.length,
   };
 }

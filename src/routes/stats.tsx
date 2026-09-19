@@ -329,13 +329,33 @@ statsRoutes.get("/players/:id", async (c) => {
                     </td>
                   </tr>
                   <tr>
+                    <td>自摸率</td>
+                    <td>
+                      {fmtPercent(traits.tsumoRate)}（{traits.tsumoCount}／和了{traits.winCount}局）
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>一発率</td>
+                    <td>
+                      {fmtPercent(traits.ippatsuRate)}（{traits.ippatsuCount}／立直{traits.riichiCount}局）
+                    </td>
+                  </tr>
+                  <tr>
                     <td>平均上がり点数</td>
                     <td>{traits.avgWinPoints != null ? `${Math.round(traits.avgWinPoints).toLocaleString("ja-JP")}点` : "-"}</td>
+                  </tr>
+                  <tr>
+                    <td>親での平均連荘回数</td>
+                    <td>
+                      {traits.avgDealerRenchan != null
+                        ? `${traits.avgDealerRenchan.toFixed(2)}回（親${traits.dealerTurnCount}回）`
+                        : "-"}
+                    </td>
                   </tr>
                 </tbody>
               </table>
               <p style="font-size:0.8rem; color:var(--ink-soft); margin:8px 0 0">
-                リーチ・鳴き・平均上がり点数は局メモへの入力状況に精度が左右されます（未入力の局は「無かった」として扱われます）。平均上がり点数は本場・リーチ棒分を含まない、役由来の点数のみの平均です。
+                リーチ・鳴き・自摸率・一発率・平均上がり点数・親での平均連荘回数は局メモへの入力状況に精度が左右されます（未入力の局は「無かった」として扱われます）。平均上がり点数は本場・リーチ棒分を含まない、役由来の点数のみの平均です。自摸率は和了数、一発率は立直回数に対する比率です。
               </p>
             </div>
 

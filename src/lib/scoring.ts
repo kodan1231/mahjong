@@ -14,6 +14,11 @@ export const ORIGIN_SCORE = 25;
  */
 export const HAKOWARE_AUTO_THRESHOLD = -31;
 
+// 半荘＝東1〜4局＋南1〜4局の8局。インデックス%4が起家からの席順（＝その局の親）に対応する
+// （東1局と南1局はどちらも起家が親、というように東場・南場で同じ並びが繰り返されるため）。
+// hand_logs.roundLabelはこの配列の値と完全一致している前提で扱う（days.tsx・aggregate.tsで共用）。
+export const ROUND_OPTIONS = ["東1局", "東2局", "東3局", "東4局", "南1局", "南2局", "南3局", "南4局"] as const;
+
 // 着順ごとの固定チップ (1位+3 / 2位0 / 3位-1 / 4位-2)
 const RANK_CHIP_TABLE: Record<number, number> = { 1: 3, 2: 0, 3: -1, 4: -2 };
 

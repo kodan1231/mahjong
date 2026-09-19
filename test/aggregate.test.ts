@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { summarizeDayTotals } from "../src/lib/aggregate";
+import { summarizeDayTotals, normalizeYakuName } from "../src/lib/aggregate";
 
 // summarizeDayTotalsは対局日詳細（loadDayDetail）が既に取得済みのparticipants/sessions/scores/
 // yakuman情報から、DBに再度問い合わせずにその日の小計を計算する純粋関数（旧computeDaySummaryの置き換え）。
@@ -83,5 +83,18 @@ describe("summarizeDayTotals", () => {
       yakumanTargets: [],
     });
     expect(result.map((r) => r.playerId)).toEqual([2, 1]);
+  });
+});
+
+describe("normalizeYakuName", () => {
+  it("鳴きあり/鳴きなしの注記を取り除き、同じ役名にまとめる", () => {
+    expect(normalizeYakuName("混一色（鳴きあり）")).toBe("混一色");
+    expect(normalizeYakuName("混一色（鳴きなし）")).toBe("混一色");
+    expect(normalizeYakuName("三色同順（鳴きあり）")).toBe("三色同順");
+  });
+
+  it("鳴きの注記が無い役名はそのまま返す", () => {
+    expect(normalizeYakuName("役牌")).toBe("役牌");
+    expect(normalizeYakuName("断幺九")).toBe("断幺九");
   });
 });

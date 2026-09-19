@@ -523,6 +523,15 @@ function average(values: number[]): number | null {
 }
 
 /**
+ * 役選択モーダル（src/lib/yaku.ts）では鳴きの有無で翻数が変わる役を「役名（鳴きあり）」
+ * 「役名（鳴きなし）」の別項目として登録しているが、上がり役別比率・得意役では
+ * 同じ役として扱いたいため、この「（鳴きあり）」「（鳴きなし）」の注記を取り除いて集計する。
+ */
+export function normalizeYakuName(name: string): string {
+  return name.replace(/（鳴き(あり|なし)）/, "");
+}
+
+/**
  * 個人ページ「特性」タブ用の各種指標（上がり率・リーチ率・鳴き率・振り込み率・平均上がり点数・
  * 得意役・上がり役別比率・表/裏/赤ドラ平均数）。分母となる「参加局数」はこのプレイヤーが座席に
  * 入っていた半荘のhand_logs件数（チョンボは同じ局のやり直し扱いのため除く）。
@@ -578,7 +587,7 @@ export async function computePlayerTraits(db: Db, playerId: number): Promise<Pla
   for (const h of winHands) {
     if (!h.yakuText) continue;
     for (const name of h.yakuText.split("、")) {
-      const trimmed = name.trim();
+      const trimmed = normalizeYakuName(name.trim());
       if (!trimmed) continue;
       yakuCounts.set(trimmed, (yakuCounts.get(trimmed) ?? 0) + 1);
     }

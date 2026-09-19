@@ -174,12 +174,31 @@ function describeHandExtras(
 // 局メモ入力フォーム（局の自動補完＋親の自動算出、結果に応じた和了者/対象/テンパイ欄の出し分け、
 // 役選択モーダル）。対局中ページと、対局日詳細の確定済み半荘の「局メモを追加・修正」の両方で使う共通部品。
 // 1ページに複数半荘分（＝複数インスタンス）表示されうるため、DOM idはすべてsessionIdで一意にしている。
+interface EditingHand {
+  id: number;
+  winType: string;
+  winnerPlayerId: number | null;
+  loserPlayerId: number | null;
+  roundLabel: string | null;
+  honba: number;
+  yakuText: string | null;
+  points: number | null;
+  tenpaiPlayerIds: string | null;
+  riichiPlayerIds: string | null;
+  nakiPlayerIds: string | null;
+  omoteDoraCount: number | null;
+  uraDoraCount: number | null;
+  akaDoraCount: number | null;
+}
+
 function HandLogForm({
   dayId,
   sessionId,
   nameBySeat,
   seatPlayers,
   hands,
+  editingHand,
+  cancelHref,
 }: {
   dayId: number;
   sessionId: number;
@@ -192,8 +211,10 @@ function HandLogForm({
     winnerPlayerId: number | null;
     tenpaiPlayerIds: string | null;
   }[];
+  editingHand?: EditingHand;
+  cancelHref?: string;
 }) {
-  const uid = String(sessionId);
+  const uid = editingHand ? `${sessionId}-${editingHand.id}` : String(sessionId);
   const seatPlayerIds = [0, 1, 2, 3].map((i) => seatPlayers.find((p) => p.seatIndex === i)?.playerId ?? null);
   // 親が和了、または流局で親がテンパイのときは同じ局のまま本場+1、それ以外は次の局に進み本場0に戻る
   // （チョンボはやり直し扱いなので判定対象から除外。computeNextRoundStateが担う）。
@@ -202,15 +223,28 @@ function HandLogForm({
     resolveRoundProgressEntries(hands, seatPlayerIds),
     ROUND_OPTIONS.length - 1,
   );
+  // 編集時は既存の局メモの値をフォーム初期値として使う。roundLabelがROUND_OPTIONSと一致しない
+  // 場合は提案値にフォールバックする。
+  const editingRoundIndex = editingHand?.roundLabel ? ROUND_OPTIONS.indexOf(editingHand.roundLabel as (typeof ROUND_OPTIONS)[number]) : -1;
+  const selectedRoundIndex = editingHand ? (editingRoundIndex >= 0 ? editingRoundIndex : nextRoundIndex) : nextRoundIndex;
+  const selectedHonba = editingHand ? editingHand.honba : nextHonba;
+  const selectedWinType = editingHand?.winType ?? "ron";
+  const selectedTenpaiIds: number[] = editingHand?.tenpaiPlayerIds ? JSON.parse(editingHand.tenpaiPlayerIds) : [];
+  const selectedRiichiIds: number[] = editingHand?.riichiPlayerIds ? JSON.parse(editingHand.riichiPlayerIds) : [];
+  const selectedNakiIds: number[] = editingHand?.nakiPlayerIds ? JSON.parse(editingHand.nakiPlayerIds) : [];
+  const selectedYakuNames = editingHand?.yakuText ? editingHand.yakuText.split("、") : [];
+  const formAction = editingHand
+    ? `/days/${dayId}/sessions/${sessionId}/hands/${editingHand.id}/edit`
+    : `/days/${dayId}/sessions/${sessionId}/hands`;
 
   return (
     <>
-      <form class="stack" method="post" action={`/days/${dayId}/sessions/${sessionId}/hands`}>
+      <form class="stack" method="post" action={formAction}>
         <label for={`round-select-${uid}`}>局</label>
         <div style="display:flex; gap:8px; align-items:center">
           <select name="roundLabel" id={`round-select-${uid}`} style="flex:1">
             {ROUND_OPTIONS.map((label, i) => (
-              <option value={label} selected={i === nextRoundIndex}>
+              <option value={label} selected={i === selectedRoundIndex}>
                 {label}
               </option>
             ))}
@@ -221,29 +255,29 @@ function HandLogForm({
             id={`honba-input-${uid}`}
             min="0"
             step="1"
-            value={nextHonba}
+            value={selectedHonba}
             style="width:5em"
             aria-label="本場"
           />
           <span>本場</span>
         </div>
         <p style="margin:0">
-          親: <strong id={`dealer-name-${uid}`}>{nameBySeat[nextRoundIndex % 4]}</strong>
+          親: <strong id={`dealer-name-${uid}`}>{nameBySeat[selectedRoundIndex % 4]}</strong>
         </p>
 
         <label>結果</label>
         <div class="choice-group" id={`result-group-${uid}`}>
           <label class="choice-btn">
-            <input type="radio" name="winType" value="ron" checked /> ロン
+            <input type="radio" name="winType" value="ron" checked={selectedWinType === "ron"} /> ロン
           </label>
           <label class="choice-btn">
-            <input type="radio" name="winType" value="tsumo" /> ツモ
+            <input type="radio" name="winType" value="tsumo" checked={selectedWinType === "tsumo"} /> ツモ
           </label>
           <label class="choice-btn">
-            <input type="radio" name="winType" value="draw" /> 流局
+            <input type="radio" name="winType" value="draw" checked={selectedWinType === "draw"} /> 流局
           </label>
           <label class="choice-btn">
-            <input type="radio" name="winType" value="chombo" /> チョンボ
+            <input type="radio" name="winType" value="chombo" checked={selectedWinType === "chombo"} /> チョンボ
           </label>
         </div>
 
@@ -252,7 +286,7 @@ function HandLogForm({
           <div class="choice-group">
             {seatPlayers.map((p) => (
               <label class="choice-btn">
-                <input type="radio" name="winnerPlayerId" value={p.playerId} /> {p.name}
+                <input type="radio" name="winnerPlayerId" value={p.playerId} checked={editingHand?.winnerPlayerId === p.playerId} /> {p.name}
               </label>
             ))}
           </div>
@@ -263,7 +297,7 @@ function HandLogForm({
           <div class="choice-group">
             {seatPlayers.map((p) => (
               <label class="choice-btn">
-                <input type="radio" name="loserPlayerId" value={p.playerId} /> {p.name}
+                <input type="radio" name="loserPlayerId" value={p.playerId} checked={editingHand?.loserPlayerId === p.playerId} /> {p.name}
               </label>
             ))}
           </div>
@@ -274,7 +308,7 @@ function HandLogForm({
           <div class="choice-group">
             {seatPlayers.map((p) => (
               <label class="choice-btn">
-                <input type="checkbox" name="tenpaiPlayerIds" value={p.playerId} /> {p.name}
+                <input type="checkbox" name="tenpaiPlayerIds" value={p.playerId} checked={selectedTenpaiIds.includes(p.playerId)} /> {p.name}
               </label>
             ))}
           </div>
@@ -284,7 +318,7 @@ function HandLogForm({
         <div class="choice-group">
           {seatPlayers.map((p) => (
             <label class="choice-btn">
-              <input type="checkbox" name="riichiPlayerIds" value={p.playerId} /> {p.name}
+              <input type="checkbox" name="riichiPlayerIds" value={p.playerId} checked={selectedRiichiIds.includes(p.playerId)} /> {p.name}
             </label>
           ))}
         </div>
@@ -293,25 +327,25 @@ function HandLogForm({
         <div class="choice-group">
           {seatPlayers.map((p) => (
             <label class="choice-btn">
-              <input type="checkbox" name="nakiPlayerIds" value={p.playerId} /> {p.name}
+              <input type="checkbox" name="nakiPlayerIds" value={p.playerId} checked={selectedNakiIds.includes(p.playerId)} /> {p.name}
             </label>
           ))}
         </div>
 
         <label for={`points-input-${uid}`}>点数（任意・役の点数のみ。本場・リーチ棒分は自動計算されます）</label>
-        <input type="number" step="100" name="points" id={`points-input-${uid}`} />
+        <input type="number" step="100" name="points" id={`points-input-${uid}`} value={editingHand?.points ?? undefined} />
 
         <div id={`dora-field-${uid}`}>
           <label>ドラ（任意）</label>
           <div style="display:flex; gap:12px; flex-wrap:wrap">
             <label style="font-weight:normal; display:flex; align-items:center; gap:4px">
-              表<input type="number" name="omoteDoraCount" min="0" step="1" style="width:4em" />枚
+              表<input type="number" name="omoteDoraCount" min="0" step="1" style="width:4em" value={editingHand?.omoteDoraCount ?? undefined} />枚
             </label>
             <label style="font-weight:normal; display:flex; align-items:center; gap:4px">
-              裏<input type="number" name="uraDoraCount" min="0" step="1" style="width:4em" />枚
+              裏<input type="number" name="uraDoraCount" min="0" step="1" style="width:4em" value={editingHand?.uraDoraCount ?? undefined} />枚
             </label>
             <label style="font-weight:normal; display:flex; align-items:center; gap:4px">
-              赤<input type="number" name="akaDoraCount" min="0" step="1" style="width:4em" />枚
+              赤<input type="number" name="akaDoraCount" min="0" step="1" style="width:4em" value={editingHand?.akaDoraCount ?? undefined} />枚
             </label>
           </div>
         </div>
@@ -322,12 +356,21 @@ function HandLogForm({
             役を選ぶ
           </button>
         </p>
-        <p id={`yaku-summary-${uid}`} style="font-size:0.9rem; color:var(--ink-soft)"></p>
-        <input type="hidden" name="yakuText" id={`yaku-text-input-${uid}`} />
+        <p id={`yaku-summary-${uid}`} style="font-size:0.9rem; color:var(--ink-soft)">
+          {selectedYakuNames.join("、")}
+        </p>
+        <input type="hidden" name="yakuText" id={`yaku-text-input-${uid}`} value={editingHand?.yakuText ?? undefined} />
 
-        <button class="btn" type="submit">
-          この局を記録する
-        </button>
+        <p style="display:flex; gap:10px">
+          <button class="btn" type="submit">
+            {editingHand ? "この局を更新する" : "この局を記録する"}
+          </button>
+          {editingHand && cancelHref && (
+            <a class="btn btn-secondary" href={cancelHref}>
+              キャンセル
+            </a>
+          )}
+        </p>
       </form>
 
       <div id={`yaku-modal-${uid}`} class="modal-overlay" hidden>
@@ -338,7 +381,7 @@ function HandLogForm({
               <h3>{g.label}</h3>
               {g.options.map((name) => (
                 <label style="display:block; font-weight:normal; padding:4px 0">
-                  <input type="checkbox" value={name} /> {name}
+                  <input type="checkbox" value={name} checked={selectedYakuNames.includes(name)} /> {name}
                 </label>
               ))}
             </>
@@ -507,7 +550,17 @@ const DayHeaderBadge = ({
   </small>
 );
 
-const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; data: DayDetail }) => {
+const DayDetailBody = ({
+  dayId,
+  admin,
+  data,
+  editHandId,
+}: {
+  dayId: number;
+  admin: boolean;
+  data: DayDetail;
+  editHandId?: number | null;
+}) => {
   const { day, participants, sessions, allScores, allHands, events, allTargets, daySummary } = data;
 
   return (
@@ -536,6 +589,7 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
         // そのまま保存している（rank===null かつ rankChip!==nullが目印）。通常の半荘確認画面で
         // 編集すると着順・チップが自動計算で上書きされてしまうため、編集リンクは出さない。
         const isSubtotalBlock = rows.length > 0 && rows.every((r) => r.rank == null) && rows.some((r) => r.rankChip != null);
+        const editingHand = editHandId != null ? hands.find((h) => h.id === editHandId) : undefined;
         return (
           <div class="card">
             <h3>
@@ -588,6 +642,12 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
                       {h.points ? ` ${h.points}点` : ""}
                       {h.yakuText ? `（${h.yakuText}）` : ""}
                       {describeHandExtras(h, (id) => rows.find((r) => r.playerId === id)?.name ?? "?")}
+                      {admin && !isSubtotalBlock && (
+                        <>
+                          {" "}
+                          <a href={`?edit=${h.id}#hand-form-${s.id}`}>編集</a>
+                        </>
+                      )}
                       {admin && (
                         <form class="inline-form" method="post" action={`/days/${dayId}/hands/${h.id}/delete`}>
                           <button class="link-button" type="submit">
@@ -634,7 +694,7 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
             )}
 
             {admin && !isSubtotalBlock && s.status === "confirmed" && (
-              <details>
+              <details open={!!editingHand} id={`hand-form-${s.id}`}>
                 <summary>局メモを追加・修正</summary>
                 <HandLogForm
                   dayId={dayId}
@@ -642,6 +702,8 @@ const DayDetailBody = ({ dayId, admin, data }: { dayId: number; admin: boolean; 
                   nameBySeat={[0, 1, 2, 3].map((i) => rows.find((r) => r.seatIndex === i)?.name ?? "?")}
                   seatPlayers={rows}
                   hands={hands}
+                  editingHand={editingHand}
+                  cancelHref={`/days/${dayId}`}
                 />
               </details>
             )}
@@ -741,6 +803,7 @@ dayRoutes.get("/", async (c) => {
 
   const data = await loadDayDetail(db, targetDay.id);
   if (!data) return c.notFound();
+  const editHandId = c.req.query("edit") ? Number(c.req.query("edit")) : null;
 
   return c.html(
     <Layout title="直近の成績" isAdmin={admin} openDayId={openDay?.id ?? null}>
@@ -753,7 +816,7 @@ dayRoutes.get("/", async (c) => {
         </small>
         <DayHeaderBadge dayId={targetDay.id} admin={admin} status={data.day.status} />
       </h1>
-      <DayDetailBody dayId={targetDay.id} admin={admin} data={data} />
+      <DayDetailBody dayId={targetDay.id} admin={admin} data={data} editHandId={editHandId} />
     </Layout>,
   );
 });
@@ -863,6 +926,7 @@ dayRoutes.get("/days/:id", async (c) => {
   if (!data) return c.notFound();
 
   const year = Number(data.day.date.slice(0, 4));
+  const editHandId = c.req.query("edit") ? Number(c.req.query("edit")) : null;
 
   return c.html(
     <Layout title={`${data.day.date} の対局`} isAdmin={admin} openDayId={openDayId}>
@@ -873,7 +937,7 @@ dayRoutes.get("/days/:id", async (c) => {
         {data.day.date} {data.day.memo ? `(${data.day.memo})` : ""}
         <DayHeaderBadge dayId={dayId} admin={admin} status={data.day.status} />
       </h1>
-      <DayDetailBody dayId={dayId} admin={admin} data={data} />
+      <DayDetailBody dayId={dayId} admin={admin} data={data} editHandId={editHandId} />
     </Layout>,
   );
 });
@@ -1001,6 +1065,9 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
   const isDone =
     !!lastProgress && lastProgress.roundIndex === ROUND_OPTIONS.length - 1 && !isDealerContinuing(lastProgress);
 
+  const editHandId = c.req.query("edit") ? Number(c.req.query("edit")) : null;
+  const editingHand = editHandId != null ? hands.find((h) => h.id === editHandId) : undefined;
+
   return c.html(
     <Layout title={`第${session.seq}半荘: 対局中`} isAdmin={true} openDayId={openDayId}>
       <p>
@@ -1066,7 +1133,8 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
                   {h.winType === "ron" && `${winnerName}が${targetName}からロン`}
                   {h.points ? ` ${h.points}点` : ""}
                   {h.yakuText ? `（${h.yakuText}）` : ""}
-                  {describeHandExtras(h, (id) => nameByPlayerId.get(id) ?? "?")}
+                  {describeHandExtras(h, (id) => nameByPlayerId.get(id) ?? "?")}{" "}
+                  <a href={`?edit=${h.id}#hand-form`}>編集</a>
                   <form class="inline-form" method="post" action={`/days/${dayId}/hands/${h.id}/delete`}>
                     <button class="link-button" type="submit">
                       [削除]
@@ -1078,8 +1146,16 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
           </ul>
         )}
 
-        <h3>局メモを追加</h3>
-        <HandLogForm dayId={dayId} sessionId={sessionId} nameBySeat={nameBySeat} seatPlayers={seatRows} hands={hands} />
+        <h3 id="hand-form">{editingHand ? "局メモを編集" : "局メモを追加"}</h3>
+        <HandLogForm
+          dayId={dayId}
+          sessionId={sessionId}
+          nameBySeat={nameBySeat}
+          seatPlayers={seatRows}
+          hands={hands}
+          editingHand={editingHand}
+          cancelHref={`/days/${dayId}/sessions/${sessionId}`}
+        />
       </div>
 
       {isDone && (
@@ -1418,12 +1494,9 @@ dayRoutes.post("/days/:id/yakuman", requireAdmin, async (c) => {
 
 // ---------- 局メモ ----------
 
-dayRoutes.post("/days/:id/sessions/:sid/hands", requireAdmin, async (c) => {
-  const dayId = Number(c.req.param("id"));
-  const sessionId = Number(c.req.param("sid"));
-  const db = getDb(c.env);
-  const body = await c.req.parseBody({ all: true });
-
+// 局メモの新規登録・編集フォームの共通パース処理。編集(update)でも新規(insert)でも
+// 同じフィールド集合を保存するため、ここで一元化する。
+function parseHandLogBody(body: { [x: string]: string | File | (string | File)[] }) {
   const winType = String(body.winType ?? "ron") as "ron" | "tsumo" | "draw" | "chombo";
   const winnerPlayerId = body.winnerPlayerId ? Number(body.winnerPlayerId) : null;
   const loserPlayerId = body.loserPlayerId ? Number(body.loserPlayerId) : null;
@@ -1446,8 +1519,7 @@ dayRoutes.post("/days/:id/sessions/:sid/hands", requireAdmin, async (c) => {
   const uraDoraCount = body.uraDoraCount ? Number(body.uraDoraCount) : null;
   const akaDoraCount = body.akaDoraCount ? Number(body.akaDoraCount) : null;
 
-  await db.insert(handLogs).values({
-    gameSessionId: sessionId,
+  return {
     winType,
     winnerPlayerId: winType === "ron" || winType === "tsumo" ? winnerPlayerId : null,
     // ロン時は放銃者、チョンボ時はチョンボした対象プレイヤーとしてloserPlayerIdを使い回す
@@ -1462,7 +1534,32 @@ dayRoutes.post("/days/:id/sessions/:sid/hands", requireAdmin, async (c) => {
     omoteDoraCount: winType === "ron" || winType === "tsumo" ? (Number.isFinite(omoteDoraCount) ? omoteDoraCount : null) : null,
     uraDoraCount: winType === "ron" || winType === "tsumo" ? (Number.isFinite(uraDoraCount) ? uraDoraCount : null) : null,
     akaDoraCount: winType === "ron" || winType === "tsumo" ? (Number.isFinite(akaDoraCount) ? akaDoraCount : null) : null,
-  });
+  };
+}
+
+dayRoutes.post("/days/:id/sessions/:sid/hands", requireAdmin, async (c) => {
+  const dayId = Number(c.req.param("id"));
+  const sessionId = Number(c.req.param("sid"));
+  const db = getDb(c.env);
+  const body = await c.req.parseBody({ all: true });
+
+  await db.insert(handLogs).values({ gameSessionId: sessionId, ...parseHandLogBody(body) });
+
+  const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));
+  if (session?.status === "pending") {
+    return c.redirect(`/days/${dayId}/sessions/${sessionId}`);
+  }
+  return c.redirect(`/days/${dayId}`);
+});
+
+dayRoutes.post("/days/:id/sessions/:sid/hands/:hid/edit", requireAdmin, async (c) => {
+  const dayId = Number(c.req.param("id"));
+  const sessionId = Number(c.req.param("sid"));
+  const handId = Number(c.req.param("hid"));
+  const db = getDb(c.env);
+  const body = await c.req.parseBody({ all: true });
+
+  await db.update(handLogs).set(parseHandLogBody(body)).where(eq(handLogs.id, handId));
 
   const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));
   if (session?.status === "pending") {

@@ -62,20 +62,35 @@ function computeYakumanChipTotals(events: YakumanEventLite[], targets: YakumanTa
   return totals;
 }
 
-async function yakumanChipsForDays(db: Db, dayIds: number[]): Promise<Map<number, number>> {
-  if (dayIds.length === 0) return new Map();
-
-  // dayIdsでSQL側に絞り込む（以前は全件取得してからJSでfilterしており、年が経つほど無駄な転送が増えていた）。
-  const events = await db.select().from(yakumanEvents).where(inArray(yakumanEvents.dayId, dayIds));
+/**
+ * 指定した日付範囲（省略時は全期間）に対応する役満チップ増減をプレイヤーごとに集計する。
+ * 以前は対象のdays.idを一旦JSの配列にしてinArray(yakumanEvents.dayId, dayIds)へ渡していたが、
+ * 対局日数が増えるほどSQL側のバインド変数がD1の上限（1クエリ100個）を超えて
+ * 「D1_ERROR: too many SQL variables」になる（computePlayerTraitsで実データにより発覚・修正済みの
+ * 問題と同じ構造）。ここではdaysを直接JOINして日付範囲そのものでSQL側を絞り込み、
+ * IDの配列をバインド変数として渡さないようにしている。
+ */
+async function yakumanChipsForDays(db: Db, dayFilter: ReturnType<typeof and>): Promise<Map<number, number>> {
+  const events = await db
+    .select({ id: yakumanEvents.id, winnerPlayerId: yakumanEvents.winnerPlayerId, chipPerLoser: yakumanEvents.chipPerLoser })
+    .from(yakumanEvents)
+    .innerJoin(days, eq(yakumanEvents.dayId, days.id))
+    .where(dayFilter);
   if (events.length === 0) return new Map();
 
   // 登録時点のスナップショット（yakuman_event_targets）から対象者を取得する。
   // day_participantsを後から編集しても、過去に確定した役満のチップ集計は変わらない。
-  const eventIds = events.map((e) => e.id);
+  // yakuman_eventsの件数は現実的にSQL変数の上限に達する心配は無いが（役満は稀な出来事のため）、
+  // 念のためこちらもIDの配列を直接渡さずサブクエリで絞り込む。
   const targetRows = await db
     .select({ yakumanEventId: yakumanEventTargets.yakumanEventId, playerId: yakumanEventTargets.playerId })
     .from(yakumanEventTargets)
-    .where(inArray(yakumanEventTargets.yakumanEventId, eventIds));
+    .where(
+      inArray(
+        yakumanEventTargets.yakumanEventId,
+        db.select({ id: yakumanEvents.id }).from(yakumanEvents).innerJoin(days, eq(yakumanEvents.dayId, days.id)).where(dayFilter),
+      ),
+    );
 
   return computeYakumanChipTotals(events, targetRows);
 }
@@ -87,39 +102,35 @@ export async function computeTotals(db: Db, range: DateRange = {}): Promise<Play
   const dayConditions = [];
   if (range.from) dayConditions.push(gte(days.date, range.from));
   if (range.to) dayConditions.push(lt(days.date, range.to));
-
-  const dayRows = await db
-    .select({ id: days.id })
-    .from(days)
-    .where(dayConditions.length ? and(...dayConditions) : undefined);
-  const dayIds = dayRows.map((d) => d.id);
+  const dayFilter = dayConditions.length ? and(...dayConditions) : undefined;
 
   const rawTotals = new Map<number, number>();
   const rankChipTotals = new Map<number, number>();
 
-  if (dayIds.length > 0) {
-    const rows = await db
-      .select({
-        playerId: sessionScores.playerId,
-        rawScore: sessionScores.rawScore,
-        rankChip: sessionScores.rankChip,
-      })
-      .from(sessionScores)
-      .innerJoin(gameSessions, eq(sessionScores.gameSessionId, gameSessions.id))
-      .where(and(eq(gameSessions.status, "confirmed"), inArray(gameSessions.dayId, dayIds)));
+  // dayIdsの配列をinArrayへ渡す代わりに、gameSessions側からdaysを直接JOINして日付範囲で絞り込む
+  // （理由はyakumanChipsForDaysのコメント参照。対局日数が100件を超えると同じ構造で壊れるため）。
+  const rows = await db
+    .select({
+      playerId: sessionScores.playerId,
+      rawScore: sessionScores.rawScore,
+      rankChip: sessionScores.rankChip,
+    })
+    .from(sessionScores)
+    .innerJoin(gameSessions, eq(sessionScores.gameSessionId, gameSessions.id))
+    .innerJoin(days, eq(gameSessions.dayId, days.id))
+    .where(and(eq(gameSessions.status, "confirmed"), dayFilter));
 
-    for (const row of rows) {
-      if (row.rawScore != null) {
-        // raw_scoreは既に配給原点からの差分（ポイント）そのものなので、そのまま合計する。
-        rawTotals.set(row.playerId, (rawTotals.get(row.playerId) ?? 0) + row.rawScore);
-      }
-      if (row.rankChip != null) {
-        rankChipTotals.set(row.playerId, (rankChipTotals.get(row.playerId) ?? 0) + row.rankChip);
-      }
+  for (const row of rows) {
+    if (row.rawScore != null) {
+      // raw_scoreは既に配給原点からの差分（ポイント）そのものなので、そのまま合計する。
+      rawTotals.set(row.playerId, (rawTotals.get(row.playerId) ?? 0) + row.rawScore);
+    }
+    if (row.rankChip != null) {
+      rankChipTotals.set(row.playerId, (rankChipTotals.get(row.playerId) ?? 0) + row.rankChip);
     }
   }
 
-  const yakumanTotals = await yakumanChipsForDays(db, dayIds);
+  const yakumanTotals = await yakumanChipsForDays(db, dayFilter);
 
   return allPlayers
     .map((p) => ({
@@ -218,45 +229,35 @@ export async function computePlayerYearlyBreakdown(db: Db, playerId: number): Pr
   const rangeFrom = `${years[0]}-01-01`;
   const rangeTo = `${years[years.length - 1]! + 1}-01-01`;
 
-  // 参加している最初〜最後の年をまとめて1回だけ取得し、その中から実際に参加した年の日だけを使う
-  // （間の空白年のデータを後段のクエリに混ぜないため）。
-  const dayRowsInRange = await db
-    .select({ id: days.id, date: days.date })
-    .from(days)
-    .where(and(gte(days.date, rangeFrom), lt(days.date, rangeTo)));
-
-  const yearByDayId = new Map<number, number>();
-  for (const d of dayRowsInRange) {
-    const year = Number(d.date.slice(0, 4));
-    if (yearSet.has(year)) yearByDayId.set(d.id, year);
-  }
-  const dayIdsInRange = [...yearByDayId.keys()];
-
   const rawTotalsByYear = new Map<number, number>();
   const rankChipTotalsByYear = new Map<number, number>();
 
-  if (dayIdsInRange.length > 0) {
-    const scoreRows = await db
-      .select({ dayId: gameSessions.dayId, rawScore: sessionScores.rawScore, rankChip: sessionScores.rankChip })
-      .from(sessionScores)
-      .innerJoin(gameSessions, eq(sessionScores.gameSessionId, gameSessions.id))
-      .where(
-        and(
-          eq(sessionScores.playerId, playerId),
-          eq(gameSessions.status, "confirmed"),
-          inArray(gameSessions.dayId, dayIdsInRange),
-        ),
-      );
+  // 以前はdays.idの配列をinArray(gameSessions.dayId, dayIdsInRange)へ渡していたが、
+  // 対局日数が増えるほどD1のSQL変数上限（1クエリ100個）に引っかかる
+  // （もつさん・支店長で実データにより発覚・修正済みの問題と同じ構造。古参プレイヤーほど早く
+  // この上限に達しうる）。gameSessions側からdaysを直接JOINし、日付範囲そのもので絞り込む。
+  const scoreRows = await db
+    .select({ date: days.date, rawScore: sessionScores.rawScore, rankChip: sessionScores.rankChip })
+    .from(sessionScores)
+    .innerJoin(gameSessions, eq(sessionScores.gameSessionId, gameSessions.id))
+    .innerJoin(days, eq(gameSessions.dayId, days.id))
+    .where(
+      and(
+        eq(sessionScores.playerId, playerId),
+        eq(gameSessions.status, "confirmed"),
+        gte(days.date, rangeFrom),
+        lt(days.date, rangeTo),
+      ),
+    );
 
-    for (const row of scoreRows) {
-      const year = yearByDayId.get(row.dayId);
-      if (year == null) continue;
-      if (row.rawScore != null) rawTotalsByYear.set(year, (rawTotalsByYear.get(year) ?? 0) + row.rawScore);
-      if (row.rankChip != null) rankChipTotalsByYear.set(year, (rankChipTotalsByYear.get(year) ?? 0) + row.rankChip);
-    }
+  for (const row of scoreRows) {
+    const year = Number(row.date.slice(0, 4));
+    if (!yearSet.has(year)) continue;
+    if (row.rawScore != null) rawTotalsByYear.set(year, (rawTotalsByYear.get(year) ?? 0) + row.rawScore);
+    if (row.rankChip != null) rankChipTotalsByYear.set(year, (rankChipTotalsByYear.get(year) ?? 0) + row.rankChip);
   }
 
-  const yakumanTotalsByYear = await yakumanChipsByYearForPlayer(db, dayIdsInRange, yearByDayId, playerId);
+  const yakumanTotalsByYear = await yakumanChipsByYearForPlayer(db, rangeFrom, rangeTo, yearSet, playerId);
 
   return years.map((year) => ({
     year,
@@ -265,24 +266,45 @@ export async function computePlayerYearlyBreakdown(db: Db, playerId: number): Pr
   }));
 }
 
-/** 指定した日々（年へのマッピング込み）の中で、そのプレイヤーに関わる役満チップ増減を年ごとに集計する。 */
+/** 指定した日付範囲の中で、そのプレイヤーに関わる役満チップ増減を年ごとに集計する。 */
 async function yakumanChipsByYearForPlayer(
   db: Db,
-  dayIds: number[],
-  yearByDayId: Map<number, number>,
+  rangeFrom: string,
+  rangeTo: string,
+  yearSet: Set<number>,
   playerId: number,
 ): Promise<Map<number, number>> {
   const totalsByYear = new Map<number, number>();
-  if (dayIds.length === 0) return totalsByYear;
 
-  const events = await db.select().from(yakumanEvents).where(inArray(yakumanEvents.dayId, dayIds));
+  // computePlayerYearlyBreakdown側のコメントと同じ理由で、days.idの配列をinArrayへ渡さず
+  // 日付範囲そのもので直接JOIN・絞り込みする。
+  const events = await db
+    .select({
+      id: yakumanEvents.id,
+      date: days.date,
+      winnerPlayerId: yakumanEvents.winnerPlayerId,
+      chipPerLoser: yakumanEvents.chipPerLoser,
+    })
+    .from(yakumanEvents)
+    .innerJoin(days, eq(yakumanEvents.dayId, days.id))
+    .where(and(gte(days.date, rangeFrom), lt(days.date, rangeTo)));
   if (events.length === 0) return totalsByYear;
 
-  const eventIds = events.map((e) => e.id);
+  // yakuman_eventsの件数は現実的にSQL変数の上限に達する心配は無いが（役満は稀な出来事のため）、
+  // 念のためこちらもIDの配列を直接渡さずサブクエリで絞り込む。
   const targetRows = await db
     .select({ yakumanEventId: yakumanEventTargets.yakumanEventId, playerId: yakumanEventTargets.playerId })
     .from(yakumanEventTargets)
-    .where(inArray(yakumanEventTargets.yakumanEventId, eventIds));
+    .where(
+      inArray(
+        yakumanEventTargets.yakumanEventId,
+        db
+          .select({ id: yakumanEvents.id })
+          .from(yakumanEvents)
+          .innerJoin(days, eq(yakumanEvents.dayId, days.id))
+          .where(and(gte(days.date, rangeFrom), lt(days.date, rangeTo))),
+      ),
+    );
 
   const targetsByEvent = new Map<number, number[]>();
   for (const row of targetRows) {
@@ -298,8 +320,8 @@ async function yakumanChipsByYearForPlayer(
     const chips = computeYakumanChips(participantIds, event.winnerPlayerId, event.chipPerLoser);
     const mine = chips.find((c) => c.playerId === playerId);
     if (!mine || mine.chip === 0) continue;
-    const year = yearByDayId.get(event.dayId);
-    if (year == null) continue;
+    const year = Number(event.date.slice(0, 4));
+    if (!yearSet.has(year)) continue;
     totalsByYear.set(year, (totalsByYear.get(year) ?? 0) + mine.chip);
   }
 
@@ -360,26 +382,25 @@ export async function computeRankDistributionForAllPlayers(
   const dayConditions = [];
   if (range.from) dayConditions.push(gte(days.date, range.from));
   if (range.to) dayConditions.push(lt(days.date, range.to));
-  const dayRows = await db
-    .select({ id: days.id })
-    .from(days)
-    .where(dayConditions.length ? and(...dayConditions) : undefined);
-  const dayIds = dayRows.map((d) => d.id);
+  const dayFilter = dayConditions.length ? and(...dayConditions) : undefined;
 
+  // inArray(gameSessions.dayId, dayIds)のようにdays.idの配列をバインド変数として渡すと
+  // 対局日数が増えるほどD1のSQL変数上限（1クエリ100個）に引っかかるため
+  // （computePlayerTraitsで実データにより発覚・修正済みの問題と同じ構造）、
+  // gameSessions側からdaysを直接JOINして日付範囲で絞り込む。
   const countsByPlayer = new Map<number, [number, number, number, number]>();
-  if (dayIds.length > 0) {
-    const rows = await db
-      .select({ playerId: sessionScores.playerId, rank: sessionScores.rank })
-      .from(sessionScores)
-      .innerJoin(gameSessions, eq(sessionScores.gameSessionId, gameSessions.id))
-      .where(and(eq(gameSessions.status, "confirmed"), inArray(gameSessions.dayId, dayIds)));
+  const rows = await db
+    .select({ playerId: sessionScores.playerId, rank: sessionScores.rank })
+    .from(sessionScores)
+    .innerJoin(gameSessions, eq(sessionScores.gameSessionId, gameSessions.id))
+    .innerJoin(days, eq(gameSessions.dayId, days.id))
+    .where(and(eq(gameSessions.status, "confirmed"), dayFilter));
 
-    for (const row of rows) {
-      if (row.rank == null || row.rank < 1 || row.rank > 4) continue;
-      const arr = countsByPlayer.get(row.playerId) ?? [0, 0, 0, 0];
-      arr[row.rank - 1] = (arr[row.rank - 1] ?? 0) + 1;
-      countsByPlayer.set(row.playerId, arr);
-    }
+  for (const row of rows) {
+    if (row.rank == null || row.rank < 1 || row.rank > 4) continue;
+    const arr = countsByPlayer.get(row.playerId) ?? [0, 0, 0, 0];
+    arr[row.rank - 1] = (arr[row.rank - 1] ?? 0) + 1;
+    countsByPlayer.set(row.playerId, arr);
   }
 
   return allPlayers

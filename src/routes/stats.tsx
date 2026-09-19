@@ -342,9 +342,6 @@ statsRoutes.get("/players/:id", async (c) => {
                   </tr>
                 </tbody>
               </table>
-              <p style="font-size:0.8rem; color:var(--ink-soft); margin:8px 0 0">
-                リーチ・鳴き・自摸率・一発率・平均上がり点数・親での平均連荘回数は局メモへの入力状況に精度が左右されます（未入力の局は「無かった」として扱われます）。平均上がり点数は本場・リーチ棒分を含まない、役由来の点数のみの平均です。自摸率は和了数、一発率は立直回数に対する比率です。
-              </p>
             </div>
 
             <div class="card">
@@ -365,9 +362,6 @@ statsRoutes.get("/players/:id", async (c) => {
                   </tr>
                 </tbody>
               </table>
-              <p style="font-size:0.8rem; color:var(--ink-soft); margin:8px 0 0">
-                ドラ枚数が入力された和了のみで平均しています（未入力の和了は分母に含めません）。
-              </p>
             </div>
 
             <div class="card">
@@ -399,9 +393,6 @@ statsRoutes.get("/players/:id", async (c) => {
                   </tbody>
                 </table>
               )}
-              <p style="font-size:0.8rem; color:var(--ink-soft); margin:8px 0 0">
-                比率は和了数（{traits.winCount}回）に対する割合です。役の入力が無い和了があると合計が100%未満になります。
-              </p>
             </div>
           </>
         )}

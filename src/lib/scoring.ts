@@ -97,8 +97,18 @@ export interface LiveHandEntry {
   loserSeat: number | null;
   /** その局の親の座席(0-3)。ツモの配分計算に使う。ronでは無視される */
   dealerSeat: number | null;
-  /** その局の点数。上がった役由来の点数のみ（本場・リーチ棒分は含まない。自動加算するため） */
+  /**
+   * その局の点数。上がった役由来の点数のみ（本場・リーチ棒分は含まない。自動加算するため）。
+   * 子のツモの場合はこの値が「子の支払い額（1人あたり）」を表す（dealerPoints参照）
+   */
   points: number | null;
+  /**
+   * 子のツモ時の「親の支払い額」。符・翻の計算過程で親・子それぞれ独立に100点単位で切り上げるため、
+   * 親の支払いは子の支払い(points)のちょうど2倍にならないことがある（例: 1300/700）。
+   * nullの場合はpoints（総受取と見なす）から比率(1/2・1/4)で近似する後方互換の計算にフォールバックする。
+   * ロン・親のツモでは無視される
+   */
+  dealerPoints: number | null;
   /** この局の本場。ロンは+300×本場を対象が全額負担、ツモは+100×本場を3人均等負担で自動加算する */
   honba: number;
   /** この局でリーチした人の座席一覧。宣言した時点で即座に-1000し、場のリーチ棒として積み立てる */
@@ -117,9 +127,11 @@ export interface LiveHandEntry {
  *   （ツモの本場分は親子の配分比とは無関係に常に均等）。pointsが無い（役の点数を未入力の）局では
  *   本場分も含めて加算しない。
  * - ロン: 和了者+ (points+本場分)、対象(放銃者)- (points+本場分) のシンプルな授受
- * - ツモ: pointsには和了者が受け取る「役由来の合計」を入力してもらう前提で、親かどうかに応じた比率
- *   （親のツモは3人が均等払い、子のツモは親が半分・残り2人が1/4ずつ）で各家の支払い額を求め、
- *   本場分（3人均等）を上乗せする
+ * - 親のツモ: pointsを3人が均等払いする「役由来の合計」として扱い、本場分（3人均等）を上乗せする
+ * - 子のツモ: 親の支払いは子の支払いのちょうど2倍にならないことがある（符・翻の計算過程で親・子
+ *   それぞれ独立に100点単位で切り上げるため。例: 1300/700）ため、dealerPointsが指定されていれば
+ *   親の支払い(dealerPoints)・子の支払い(points、1人あたり)をそのまま使う。dealerPointsが無い
+ *   （後方互換の）場合のみ、pointsを総受取とみなし親1/2・子1/4ずつの比率で近似する
  * - 流局: リーチ供託に加え、テンパイ料（ノーテン罰符）合計3000点をテンパイ者に均等分配し、
  *   ノーテン者から均等に徴収する（テンパイ1人:+3000/他-1000ずつ、2人:各+1500/各-1500、
  *   3人:各+1000/-3000、0人・4人:授受なし）
@@ -164,15 +176,26 @@ export function computeLiveScores(hands: LiveHandEntry[]): number[] {
     } else if (h.winType === "tsumo" && h.winnerSeat != null) {
       const dealerSeat = h.dealerSeat ?? 0;
       const honbaShare = 100 * h.honba;
-      scores[h.winnerSeat]! += h.points + honbaBonus;
-      for (let seat = 0; seat < 4; seat++) {
-        if (seat === h.winnerSeat) continue;
-        if (h.winnerSeat === dealerSeat) {
+      if (h.winnerSeat === dealerSeat) {
+        // 親のツモ: 3人が均等払い
+        scores[h.winnerSeat]! += h.points + honbaBonus;
+        for (let seat = 0; seat < 4; seat++) {
+          if (seat === h.winnerSeat) continue;
           scores[seat]! -= h.points / 3 + honbaShare;
-        } else if (seat === dealerSeat) {
-          scores[seat]! -= h.points / 2 + honbaShare;
-        } else {
-          scores[seat]! -= h.points / 4 + honbaShare;
+        }
+      } else if (h.dealerPoints != null) {
+        // 子のツモ: 親・子の支払いをそのまま使う（親のちょうど2倍とは限らないため）
+        scores[h.winnerSeat]! += h.dealerPoints + h.points * 2 + honbaBonus;
+        for (let seat = 0; seat < 4; seat++) {
+          if (seat === h.winnerSeat) continue;
+          scores[seat]! -= (seat === dealerSeat ? h.dealerPoints : h.points) + honbaShare;
+        }
+      } else {
+        // 後方互換: dealerPoints未指定時はpointsを総受取とみなし比率(親1/2・子1/4)で近似する
+        scores[h.winnerSeat]! += h.points + honbaBonus;
+        for (let seat = 0; seat < 4; seat++) {
+          if (seat === h.winnerSeat) continue;
+          scores[seat]! -= (seat === dealerSeat ? h.points / 2 : h.points / 4) + honbaShare;
         }
       }
     }

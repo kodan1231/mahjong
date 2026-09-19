@@ -18,6 +18,7 @@ export const YAKU_GROUPS: YakuGroup[] = [
       "立直",
       "門前清自摸和",
       "平和",
+      "断幺九",
       "一盃口",
       "役牌",
       "一発",

@@ -260,6 +260,8 @@ function HandLogForm({
           <input
             type="number"
             name="honba"
+            inputmode="numeric"
+            pattern="[0-9]*"
             id={`honba-input-${uid}`}
             min="0"
             step="1"
@@ -272,6 +274,24 @@ function HandLogForm({
         <p style="margin:0">
           親: <strong id={`dealer-name-${uid}`}>{nameBySeat[selectedRoundIndex % 4]}</strong>
         </p>
+
+        <label>リーチした人（任意）</label>
+        <div class="choice-group choice-group-compact">
+          {seatPlayers.map((p) => (
+            <label class="choice-btn">
+              <input type="checkbox" name="riichiPlayerIds" value={p.playerId} checked={selectedRiichiIds.includes(p.playerId)} /> {p.name}
+            </label>
+          ))}
+        </div>
+
+        <label>鳴いた人（任意）</label>
+        <div class="choice-group choice-group-compact">
+          {seatPlayers.map((p) => (
+            <label class="choice-btn">
+              <input type="checkbox" name="nakiPlayerIds" value={p.playerId} checked={selectedNakiIds.includes(p.playerId)} /> {p.name}
+            </label>
+          ))}
+        </div>
 
         <label>結果</label>
         <div class="choice-group" id={`result-group-${uid}`}>
@@ -291,7 +311,7 @@ function HandLogForm({
 
         <div id={`winner-field-${uid}`}>
           <label>和了者</label>
-          <div class="choice-group">
+          <div class="choice-group choice-group-compact">
             {seatPlayers.map((p) => (
               <label class="choice-btn">
                 <input type="radio" name="winnerPlayerId" value={p.playerId} checked={editingHand?.winnerPlayerId === p.playerId} /> {p.name}
@@ -302,7 +322,7 @@ function HandLogForm({
 
         <div id={`target-field-${uid}`}>
           <label>対象</label>
-          <div class="choice-group">
+          <div class="choice-group choice-group-compact">
             {seatPlayers.map((p) => (
               <label class="choice-btn">
                 <input type="radio" name="loserPlayerId" value={p.playerId} checked={editingHand?.loserPlayerId === p.playerId} /> {p.name}
@@ -313,7 +333,7 @@ function HandLogForm({
 
         <div id={`tenpai-field-${uid}`} hidden>
           <label>テンパイ</label>
-          <div class="choice-group">
+          <div class="choice-group choice-group-compact">
             {seatPlayers.map((p) => (
               <label class="choice-btn">
                 <input type="checkbox" name="tenpaiPlayerIds" value={p.playerId} checked={selectedTenpaiIds.includes(p.playerId)} /> {p.name}
@@ -322,38 +342,20 @@ function HandLogForm({
           </div>
         </div>
 
-        <label>リーチした人（任意）</label>
-        <div class="choice-group">
-          {seatPlayers.map((p) => (
-            <label class="choice-btn">
-              <input type="checkbox" name="riichiPlayerIds" value={p.playerId} checked={selectedRiichiIds.includes(p.playerId)} /> {p.name}
-            </label>
-          ))}
-        </div>
-
-        <label>鳴いた人（任意）</label>
-        <div class="choice-group">
-          {seatPlayers.map((p) => (
-            <label class="choice-btn">
-              <input type="checkbox" name="nakiPlayerIds" value={p.playerId} checked={selectedNakiIds.includes(p.playerId)} /> {p.name}
-            </label>
-          ))}
-        </div>
-
         <label for={`points-input-${uid}`}>点数（任意・役の点数のみ。本場・リーチ棒分は自動計算されます）</label>
-        <input type="number" step="100" name="points" id={`points-input-${uid}`} value={editingHand?.points ?? undefined} />
+        <input type="number" inputmode="numeric" pattern="[0-9]*" step="100" name="points" id={`points-input-${uid}`} value={editingHand?.points ?? undefined} />
 
         <div id={`dora-field-${uid}`}>
           <label>ドラ（任意）</label>
           <div style="display:flex; gap:12px; flex-wrap:wrap">
             <label style="font-weight:normal; display:flex; align-items:center; gap:4px">
-              表<input type="number" name="omoteDoraCount" min="0" step="1" style="width:4em" value={editingHand?.omoteDoraCount ?? undefined} />枚
+              表<input type="number" name="omoteDoraCount" inputmode="numeric" pattern="[0-9]*" min="0" step="1" style="width:4em" value={editingHand?.omoteDoraCount ?? undefined} />枚
             </label>
             <label style="font-weight:normal; display:flex; align-items:center; gap:4px">
-              裏<input type="number" name="uraDoraCount" min="0" step="1" style="width:4em" value={editingHand?.uraDoraCount ?? undefined} />枚
+              裏<input type="number" name="uraDoraCount" inputmode="numeric" pattern="[0-9]*" min="0" step="1" style="width:4em" value={editingHand?.uraDoraCount ?? undefined} />枚
             </label>
             <label style="font-weight:normal; display:flex; align-items:center; gap:4px">
-              赤<input type="number" name="akaDoraCount" min="0" step="1" style="width:4em" value={editingHand?.akaDoraCount ?? undefined} />枚
+              赤<input type="number" name="akaDoraCount" inputmode="numeric" pattern="[0-9]*" min="0" step="1" style="width:4em" value={editingHand?.akaDoraCount ?? undefined} />枚
             </label>
           </div>
         </div>

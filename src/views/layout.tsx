@@ -272,6 +272,8 @@ const css = `
     pointer-events: none;
   }
   .choice-btn:has(input:checked) { background: var(--gold); border-color: var(--gold-dark); color: #2a2306; }
+  /* 局メモの和了者/対象/テンパイ/リーチ/鳴きの4人分の選択肢。iPhone SE3幅で4人目が見切れないよう2割小さくする。 */
+  .choice-group-compact .choice-btn { padding: 7px 10px; font-size: 0.74rem; }
 
   .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; background: #e5e7df; color: var(--ink-soft); }
   .badge-pending { background: #fdeecb; color: #92600e; }

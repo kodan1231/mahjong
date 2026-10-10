@@ -201,3 +201,57 @@ export const FU_CALC_TABLE: FuCalcGroup[] = [
     ],
   },
 ];
+
+// ---------- ツモの支払い配分（局メモの合計点 → 各家の支払い） ----------
+
+// 早見表の表示用（FU_ROWS）とは別に、実際に起こりうる符をすべて含める
+// （70符以上や25符のツモも、合計点から支払いを割り戻す時には必要になるため）。
+const TSUMO_LOOKUP_FU = [20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110] as const;
+
+export interface TsumoPayment {
+  /** 子が1人あたり支払う額（和了者が親の場合は「オール」の額） */
+  nonDealerPays: number;
+  /** 親が支払う額。和了者が親の場合はnull */
+  dealerPays: number | null;
+  /** 点数表どおりの合計だったか。falseは表にない合計を計算式で近似した値 */
+  matched: boolean;
+}
+
+function buildTsumoLookup(): { nonDealer: Map<number, TsumoPayment>; dealer: Map<number, TsumoPayment> } {
+  const nonDealer = new Map<number, TsumoPayment>();
+  const dealer = new Map<number, TsumoPayment>();
+  const addNonDealer = (other: number, dealerPays: number) =>
+    nonDealer.set(other * 2 + dealerPays, { nonDealerPays: other, dealerPays, matched: true });
+  const addDealer = (each: number) => dealer.set(each * 3, { nonDealerPays: each, dealerPays: null, matched: true });
+
+  for (const fu of TSUMO_LOOKUP_FU) {
+    for (const han of HAN_COLS) {
+      const base = basePoints(fu, han);
+      addNonDealer(roundUp100(base), roundUp100(base * 2));
+      addDealer(roundUp100(base * 2));
+    }
+  }
+  for (const tier of FIXED_TIERS) {
+    addNonDealer(tier.nonDealerTsumoOther, tier.nonDealerTsumoDealer);
+    addDealer(tier.dealerTsumoEach);
+  }
+  return { nonDealer, dealer };
+}
+
+const TSUMO_LOOKUP = buildTsumoLookup();
+
+/**
+ * ツモの合計点（和了者が受け取る役由来の合計。本場・リーチ棒は含まない）から各家の支払いを求める。
+ * 子のツモは「300/500」「700/1300」のように親子の比率が単純な1:2にならないため、
+ * 点数表（上の基本点の計算式から生成）を引いて決める。表にない合計（ダブル役満や入力ミスなど）は
+ * 計算式で近い値を出し matched: false を返す（呼び出し側で警告し、確認画面で手修正してもらう）。
+ */
+export function resolveTsumoPayment(total: number, winnerIsDealer: boolean): TsumoPayment {
+  const hit = (winnerIsDealer ? TSUMO_LOOKUP.dealer : TSUMO_LOOKUP.nonDealer).get(total);
+  if (hit) return hit;
+  if (winnerIsDealer) {
+    return { nonDealerPays: roundUp100(total / 3), dealerPays: null, matched: false };
+  }
+  const other = roundUp100(total / 4);
+  return { nonDealerPays: other, dealerPays: Math.max(total - other * 2, 0), matched: false };
+}

@@ -18,8 +18,10 @@ import { Signed, TotalsTable, TabBar } from "../views/components";
 import { requireAdmin, isAdmin } from "../lib/auth";
 import {
   computeRankAndChips,
-  roundPointsGosha,
+  computeFinalPoints,
   sumScores,
+  RETURN_SCORE,
+  TOTAL_SOTEN,
   ORIGIN_SCORE,
   HAKOWARE_AUTO_THRESHOLD,
   ROUND_OPTIONS,
@@ -32,6 +34,7 @@ import {
 import { summarizeDayTotals } from "../lib/aggregate";
 import { getOpenDayId } from "../lib/dayState";
 import { YAKU_GROUPS } from "../lib/yaku";
+import { resolveTsumoPayment } from "../lib/scoreTable";
 
 export const dayRoutes = new Hono<{ Bindings: Env }>();
 
@@ -129,6 +132,24 @@ function resolveRoundProgressEntries(
     });
   }
   return entries;
+}
+
+// 局メモ一覧表示用: 点数を「 1100点（300/500）」「 3900点（1300オール）」のように表示する。
+// ツモは点数表（resolveTsumoPayment）で割り戻した支払い内訳を添え、表にない合計なら注意書きを付ける
+// （暫定スコアは近似値になるため、確認画面で素点を手直ししてもらう）。日別ページ・対局中ページで共通利用。
+function describePoints(
+  h: { winType: string; points: number | null; roundLabel: string | null; winnerPlayerId: number | null },
+  seatOf: (playerId: number) => number | undefined,
+): string {
+  if (!h.points) return "";
+  if (h.winType !== "tsumo") return ` ${h.points}点`;
+  const roundIndex = h.roundLabel ? ROUND_OPTIONS.indexOf(h.roundLabel as (typeof ROUND_OPTIONS)[number]) : -1;
+  const winnerSeat = h.winnerPlayerId != null ? seatOf(h.winnerPlayerId) : undefined;
+  if (roundIndex < 0 || winnerSeat == null) return ` ${h.points}点`;
+  const payment = resolveTsumoPayment(h.points, winnerSeat === roundIndex % 4);
+  const split =
+    payment.dealerPays == null ? `${payment.nonDealerPays}オール` : `${payment.nonDealerPays}/${payment.dealerPays}`;
+  return ` ${h.points}点（${split}${payment.matched ? "" : "・※点数表にない合計です"}）`;
 }
 
 // 局メモ一覧表示用: 上がった本人の情報である役・ドラ枚数を「（立直、門前清自摸和、ドラ赤1）」のように
@@ -649,7 +670,7 @@ const DayDetailBody = ({
                         `${rows.find((r) => r.playerId === h.winnerPlayerId)?.name ?? "?"}が${
                           rows.find((r) => r.playerId === h.loserPlayerId)?.name ?? "?"
                         }からロン`}
-                      {h.points ? ` ${h.points}点` : ""}
+                      {describePoints(h, (id) => rows.find((r) => r.playerId === id)?.seatIndex)}
                       {describeYakuAndDora(h)}
                       {describeHandExtras(h, (id) => rows.find((r) => r.playerId === id)?.name ?? "?")}
                       {admin && !isSubtotalBlock && (
@@ -1144,7 +1165,7 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
                   {h.winType === "chombo" && `チョンボ（${targetName ?? "?"}）`}
                   {h.winType === "tsumo" && `${winnerName}がツモ`}
                   {h.winType === "ron" && `${winnerName}が${targetName}からロン`}
-                  {h.points ? ` ${h.points}点` : ""}
+                  {describePoints(h, (id) => seatRows.find((r) => r.playerId === id)?.seatIndex)}
                   {describeYakuAndDora(h)}
                   {describeHandExtras(h, (id) => nameByPlayerId.get(id) ?? "?")}{" "}
                   <a href={`?edit=${h.id}#hand-form`}>編集</a>
@@ -1160,12 +1181,26 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
         )}
       </div>
 
-      {isDone && (
+      {isDone ? (
         <div class="card">
           <h2>南4局まで終了しました</h2>
           <p style="display:flex; gap:10px; flex-wrap:wrap">
             <a class="btn" href={`/days/${dayId}/sessions/${sessionId}/confirm`}>
               点数を確定する
+            </a>
+          </p>
+        </div>
+      ) : (
+        // 箱下での途中終了や、オーラスで親がトップのままやめる（アガリ止め）場合など、
+        // 南4局の決着以外で半荘を終えるための導線。自動では終了させず、押した時だけ確認画面へ進む。
+        <div class="card">
+          <p style="margin:0">
+            <a
+              class="btn btn-secondary"
+              href={`/days/${dayId}/sessions/${sessionId}/confirm`}
+              onclick="return confirm('この局で半荘を終了して、点数の確定に進みます。よろしいですか？')"
+            >
+              この局で半荘を終了する
             </a>
           </p>
         </div>
@@ -1176,9 +1211,19 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
 
 // ---------- 確認・確定 ----------
 
-dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
-  const dayId = Number(c.req.param("id"));
-  const sessionId = Number(c.req.param("sid"));
+// 確認画面の描画。GETと、POSTで確定できなかった場合（素点の合計が100000点でない・同点）の両方から使う。
+// 確定できなかった場合はリダイレクトせずにこの関数で直接描画し、入力した素点をそのまま残す
+// （素点はDBに保存する列が無いため。session_scores.raw_scoreは確定後の集計用ポイント専用）。
+async function renderConfirmPage(
+  c: Context<{ Bindings: Env }>,
+  dayId: number,
+  sessionId: number,
+  opts: {
+    warning?: "badsum" | "tie" | "missing";
+    sotenOverrides?: Map<number, string>;
+    tieBreakOverrides?: Map<number, number>;
+  } = {},
+) {
   const db = getDb(c.env);
 
   const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));
@@ -1191,7 +1236,6 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
         playerId: sessionScores.playerId,
         name: players.name,
         rawScore: sessionScores.rawScore,
-        rank: sessionScores.rank,
       })
       .from(sessionScores)
       .innerJoin(players, eq(sessionScores.playerId, players.id))
@@ -1201,98 +1245,156 @@ dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
     getOpenDayId(db),
   ]);
 
-  // 対局中ページで局メモから随時計算していた「現在のスコア」を、まだ何も保存されていない場合の
-  // プリフィルに使う（南4局まで手入力で記録していれば、ここでほぼそのまま確定できる）。
-  // 局メモが1件も無い（＝この半荘では対局中ページを使わなかった）場合は0埋めになってしまうと
-  // 紛らわしいため、その場合はこのフォールバックを使わない。
+  // 対局中ページで局メモから随時計算していた「現在のスコア」を素点に直して初期値に使う
+  // （南4局まで局メモを記録していれば、ここでほぼそのまま確定できる）。局メモが1件も無い場合は
+  // 全員25000点で埋めると紛らわしいため空欄にする。
   const seatPlayerIdsForLiveScore = [0, 1, 2, 3].map((i) => rows.find((r) => r.seatIndex === i)?.playerId ?? null);
   const liveScores =
     hands.length > 0 ? computeLiveScores(resolveLiveHandEntries(hands, seatPlayerIdsForLiveScore)) : null;
 
-  const tieWarning = c.req.query("tie") === "1";
-  const badSumWarning = c.req.query("badsum") === "1";
-  const roundMismatchWarning = c.req.query("roundmismatch") === "1";
-  // 丸め不一致の警告では、1位の座席だけ丸め後ポイントを手修正できるようにする
-  // （順位はここに来る前の精密値ベースの判定で既に確定・保存済み）。
-  const rank1PlayerId = rows.find((r) => r.rank === 1)?.playerId ?? null;
+  const isConfirmed = session.status === "confirmed";
+  const tieWarning = opts.warning === "tie";
 
   return c.html(
     <Layout title="点数を確認" isAdmin={true} openDayId={openDayId}>
       <h1>第{session.seq}半荘: 点数を確認</h1>
-      {badSumWarning && (
-        <p class="warning">4人分のポイントの合計が0になっていません。入力ミスがないか確認してください。</p>
+      {opts.warning === "missing" && <p class="warning">4人分の素点をすべて入力してください。</p>}
+      {opts.warning === "badsum" && (
+        <p class="warning">
+          4人分の素点の合計が{TOTAL_SOTEN.toLocaleString("ja-JP")}点になっていません。入力ミスがないか確認してください。
+        </p>
       )}
       {tieWarning && (
         <p class="warning">
-          同点です。ポイントを調整して同点を解消するか、各座席の「同点時の順位」でどちらが上位かを選び、下のチェックを入れて確定してください。
+          同点です。素点を調整して同点を解消するか、各座席の「同点時の順位」でどちらが上位かを選び、下のチェックを入れて確定してください。
         </p>
       )}
-      {roundMismatchWarning && (
-        <p class="warning">
-          各自のポイントを集計用に丸めた結果、4人分の合計が0になりませんでした。1位の欄を手で調整して合計0にしてから確定してください。
-        </p>
-      )}
-      {liveScores && !rows.some((r) => r.rawScore != null) && (
-        <p style="font-size:0.85rem; color:var(--ink-soft)">
-          対局中に入力した局メモから計算した暫定スコアを下の欄に入れています。正しければそのまま確定、間違っていれば修正してください。
+      {!opts.sotenOverrides && liveScores && (
+        <p style="font-size:0.85rem">
+          対局中に入力した局メモから計算した素点を下の欄に入れています。正しければそのまま確定、間違っていれば修正してください。
         </p>
       )}
       <div class="card">
-      <form class="stack" method="post" action={`/days/${dayId}/sessions/${sessionId}/confirm`}>
-        {rows.map((r) => {
-          const liveScore = liveScores ? liveScores[r.seatIndex]! / 1000 : null;
-          const prefill = r.rawScore ?? (liveScore ?? "");
-          const roundedPoint = r.rawScore != null ? roundPointsGosha(r.rawScore) : null;
-          return (
-            <div class="seat-block">
-              <div class="seat-row">
-                <span class="seat-label">{WIND_LABELS[r.seatIndex]}</span>
-                <strong>{r.name}</strong>
-              </div>
-              <div class="seat-row">
-                <input type="number" step="0.1" name={`score_${r.seatIndex}`} value={String(prefill)} required />
-              </div>
-              {tieWarning && (
+        <p style="font-size:0.85rem; color:var(--ink-soft); margin-top:0">
+          最終的な素点（例: 32300）を入力してください。30000点返しで、2〜4位は素点を五捨六入して30000点を引き、1位は残り3人分のマイナスを総取りします。
+        </p>
+        <form class="stack" method="post" action={`/days/${dayId}/sessions/${sessionId}/confirm`} id="confirm-form">
+          {rows.map((r) => {
+            const override = opts.sotenOverrides?.get(r.seatIndex);
+            const liveSoten = liveScores ? ORIGIN_SCORE * 1000 + liveScores[r.seatIndex]! : null;
+            const prefill = override ?? (liveSoten != null ? String(liveSoten) : "");
+            return (
+              <div class="seat-block">
                 <div class="seat-row">
-                  <label style="font-weight:normal">
-                    同点時の順位:{" "}
-                    <select name={`tiebreak_${r.seatIndex}`}>
-                      {[1, 2, 3, 4].map((n) => (
-                        <option value={n} selected={n === r.seatIndex + 1}>
-                          {n}位
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <span class="seat-label">{WIND_LABELS[r.seatIndex]}</span>
+                  <strong>{r.name}</strong>
+                  {isConfirmed && r.rawScore != null && (
+                    <span style="font-size:0.8rem; color:var(--ink-soft)">
+                      （確定済み: <Signed n={r.rawScore} />）
+                    </span>
+                  )}
                 </div>
-              )}
-              {roundMismatchWarning && roundedPoint != null && (
                 <div class="seat-row">
-                  <label style="font-weight:normal">
-                    集計用ポイント（丸め後）:{" "}
-                    {r.playerId === rank1PlayerId ? (
-                      <input type="number" step="1" name={`roundedOverride_${r.playerId}`} value={roundedPoint} style="width:5em" />
-                    ) : (
-                      <strong>{roundedPoint}</strong>
-                    )}
-                  </label>
+                  <input
+                    type="number"
+                    inputmode="numeric"
+                    step="100"
+                    name={`soten_${r.seatIndex}`}
+                    data-seat={r.seatIndex}
+                    class="soten-input"
+                    value={prefill}
+                    placeholder="25000"
+                    required
+                  />
+                  <span id={`final-preview-${r.seatIndex}`} style="min-width:6em; font-weight:700"></span>
                 </div>
-              )}
-            </div>
-          );
-        })}
-        {tieWarning && (
-          <label style="font-weight:normal">
-            <input type="checkbox" name="acceptTie" value="1" /> 同点のまま上で選んだ順位で確定する
-          </label>
-        )}
-        <button class="btn" type="submit">
-          確定
-        </button>
-      </form>
+                {tieWarning && (
+                  <div class="seat-row">
+                    <label style="font-weight:normal">
+                      同点時の順位:{" "}
+                      <select name={`tiebreak_${r.seatIndex}`} class="tiebreak-select" data-seat={r.seatIndex}>
+                        {[1, 2, 3, 4].map((n) => (
+                          <option value={n} selected={n === (opts.tieBreakOverrides?.get(r.seatIndex) ?? r.seatIndex + 1)}>
+                            {n}位
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <p id="soten-sum" style="margin:0; font-size:0.9rem"></p>
+          {tieWarning && (
+            <label style="font-weight:normal">
+              <input type="checkbox" name="acceptTie" value="1" /> 同点のまま上で選んだ順位で確定する
+            </label>
+          )}
+          <button class="btn" type="submit">
+            確定
+          </button>
+        </form>
       </div>
+      {/* 入力中の素点から着順と30000点返しのポイントをその場で表示する（確定時の計算はサーバー側の
+          computeRankAndChips/computeFinalPointsが正。ここは同じルールを再現した目安表示）。 */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+(function () {
+  var form = document.getElementById("confirm-form");
+  var inputs = Array.prototype.slice.call(form.querySelectorAll(".soten-input"));
+  var sumEl = document.getElementById("soten-sum");
+  var RETURN_SCORE = ${RETURN_SCORE}, TOTAL = ${TOTAL_SOTEN};
+  function roundGosha(s) {
+    var floor = Math.floor(s / 1000) * 1000;
+    return s - floor >= 600 ? floor + 1000 : floor;
+  }
+  function tieBreakOf(seat) {
+    var sel = form.querySelector('.tiebreak-select[data-seat="' + seat + '"]');
+    return sel ? Number(sel.value) : seat;
+  }
+  function fmt(n) { return (n > 0 ? "+" : "") + n; }
+  function update() {
+    var entries = inputs.map(function (el) {
+      return { seat: Number(el.dataset.seat), value: el.value === "" ? NaN : Number(el.value) };
+    });
+    inputs.forEach(function (el) { document.getElementById("final-preview-" + el.dataset.seat).textContent = ""; });
+    if (entries.some(function (e) { return !isFinite(e.value); })) { sumEl.textContent = ""; return; }
+    var sum = entries.reduce(function (a, e) { return a + e.value; }, 0);
+    var diff = TOTAL - sum;
+    sumEl.textContent = "合計: " + sum.toLocaleString("ja-JP") + "点" +
+      (diff === 0 ? "（OK）" : "（" + (diff > 0 ? "あと" + diff.toLocaleString("ja-JP") + "点不足" : (-diff).toLocaleString("ja-JP") + "点超過") + "）");
+    sumEl.style.color = diff === 0 ? "" : "#c0392b";
+    var sorted = entries.slice().sort(function (a, b) {
+      return b.value - a.value || tieBreakOf(a.seat) - tieBreakOf(b.seat);
+    });
+    var othersSum = 0;
+    sorted.forEach(function (e, i) {
+      if (i === 0) return;
+      e.point = (roundGosha(e.value) - RETURN_SCORE) / 1000;
+      othersSum += e.point;
+    });
+    sorted[0].point = -othersSum;
+    sorted.forEach(function (e, i) {
+      var el = document.getElementById("final-preview-" + e.seat);
+      el.textContent = (i + 1) + "位 " + fmt(e.point);
+      el.className = e.point >= 0 ? "plus" : "minus";
+    });
+  }
+  form.addEventListener("input", update);
+  form.addEventListener("change", update);
+  update();
+})();
+`,
+        }}
+      />
     </Layout>,
   );
+}
+
+dayRoutes.get("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
+  return renderConfirmPage(c, Number(c.req.param("id")), Number(c.req.param("sid")));
 });
 
 dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
@@ -1309,78 +1411,55 @@ dayRoutes.post("/days/:id/sessions/:sid/confirm", requireAdmin, async (c) => {
     .where(eq(sessionScores.gameSessionId, sessionId));
   const playerIdBySeat = new Map(existingSeats.map((s) => [s.seatIndex, s.playerId]));
 
-  const seatInputs = [0, 1, 2, 3].map((seatIndex) => ({
-    seatIndex,
-    playerId: playerIdBySeat.get(seatIndex)!,
-    rawScore: Number(body[`score_${seatIndex}`]),
-    tieBreakPriority: body[`tiebreak_${seatIndex}`] != null ? Number(body[`tiebreak_${seatIndex}`]) : undefined,
-  }));
+  const seatInputs = [0, 1, 2, 3].map((seatIndex) => {
+    const raw = String(body[`soten_${seatIndex}`] ?? "").trim();
+    return {
+      seatIndex,
+      playerId: playerIdBySeat.get(seatIndex)!,
+      rawInput: raw,
+      soten: raw === "" ? NaN : Number(raw),
+      tieBreakPriority: body[`tiebreak_${seatIndex}`] != null ? Number(body[`tiebreak_${seatIndex}`]) : undefined,
+    };
+  });
+  const sotenOverrides = new Map(seatInputs.map((s) => [s.seatIndex, s.rawInput]));
+  const tieBreakOverrides = new Map(
+    seatInputs.filter((s) => s.tieBreakPriority != null).map((s) => [s.seatIndex, s.tieBreakPriority!]),
+  );
 
-  const acceptTie = body.acceptTie === "1";
-
-  // 4人分のポイント（配給原点からの差分）は必ず合計0になるはず。ずれていたら入力ミスなので確定させない。
-  if (Math.abs(sumScores(seatInputs.map(({ playerId, rawScore }) => ({ playerId, rawScore })))) > 0.05) {
-    for (const s of seatInputs) {
-      await db
-        .update(sessionScores)
-        .set({ rawScore: s.rawScore })
-        .where(and(eq(sessionScores.gameSessionId, sessionId), eq(sessionScores.seatIndex, s.seatIndex)));
-    }
-    return c.redirect(`/days/${dayId}/sessions/${sessionId}/confirm?badsum=1`);
+  if (seatInputs.some((s) => !Number.isFinite(s.soten))) {
+    return renderConfirmPage(c, dayId, sessionId, { warning: "missing", sotenOverrides, tieBreakOverrides });
   }
 
+  // 4人分の素点の合計は必ず100000点（25000点×4人）になるはず。ずれていたら入力ミスなので確定させない。
+  if (seatInputs.reduce((sum, s) => sum + s.soten, 0) !== TOTAL_SOTEN) {
+    return renderConfirmPage(c, dayId, sessionId, { warning: "badsum", sotenOverrides, tieBreakOverrides });
+  }
+
+  // 着順は丸める前の素点で決める
   const { ranked, hasTie } = computeRankAndChips(
-    seatInputs.map(({ playerId, rawScore, tieBreakPriority }) => ({ playerId, rawScore, tieBreakPriority })),
+    seatInputs.map(({ playerId, soten, tieBreakPriority }) => ({ playerId, rawScore: soten, tieBreakPriority })),
   );
 
-  if (hasTie && !acceptTie) {
-    // 一旦入力値だけ保存し、確認画面に戻して警告を出す（着順・チップは未確定のまま）
-    for (const s of seatInputs) {
-      await db
-        .update(sessionScores)
-        .set({ rawScore: s.rawScore })
-        .where(and(eq(sessionScores.gameSessionId, sessionId), eq(sessionScores.seatIndex, s.seatIndex)));
-    }
-    return c.redirect(`/days/${dayId}/sessions/${sessionId}/confirm?tie=1`);
+  if (hasTie && body.acceptTie !== "1") {
+    return renderConfirmPage(c, dayId, sessionId, { warning: "tie", sotenOverrides, tieBreakOverrides });
   }
 
-  // 日別/年度別/通算の集計では、精密なポイント（100点単位）ではなく五捨六入した整数ポイント
-  // （1000点単位）を使う。各自を独立に丸めるため4人分の合計が0からずれることがあり、
-  // その場合は1位の丸め後ポイントを手修正してもらう（roundedOverride_<playerId>）。
-  // 順位・チップは常に丸め前の精密な値（ranked）で決まっており、ここでは変わらない。
-  const rank1PlayerId = ranked.find((r) => r.rank === 1)?.playerId ?? null;
-  const roundedPoints = new Map(
-    seatInputs.map((s) => {
-      if (s.playerId === rank1PlayerId && body[`roundedOverride_${s.playerId}`] != null) {
-        return [s.playerId, Number(body[`roundedOverride_${s.playerId}`])] as const;
-      }
-      return [s.playerId, roundPointsGosha(s.rawScore)] as const;
-    }),
+  // 集計用ポイントは30000点返し（2〜4位は素点を五捨六入して-30000、1位は残り3人分の総取り）。
+  // 1位を残りから決めるため4人分の合計は常に0になる。
+  const finalPoints = computeFinalPoints(
+    seatInputs.map((s) => ({
+      playerId: s.playerId,
+      soten: s.soten,
+      rank: ranked.find((r) => r.playerId === s.playerId)!.rank,
+    })),
   );
-  const roundedSum = [...roundedPoints.values()].reduce((sum, v) => sum + v, 0);
-
-  if (roundedSum !== 0) {
-    // 精密値ベースの順位・チップは確定させ、丸め後ポイントの調整だけ確認画面に戻して待つ。
-    for (const s of seatInputs) {
-      const r = ranked.find((x) => x.playerId === s.playerId);
-      await db
-        .update(sessionScores)
-        .set({
-          rawScore: s.rawScore,
-          rank: r?.rank ?? null,
-          rankChip: r?.rankChip ?? null,
-        })
-        .where(and(eq(sessionScores.gameSessionId, sessionId), eq(sessionScores.seatIndex, s.seatIndex)));
-    }
-    return c.redirect(`/days/${dayId}/sessions/${sessionId}/confirm?roundmismatch=1`);
-  }
 
   for (const s of seatInputs) {
     const r = ranked.find((x) => x.playerId === s.playerId);
     await db
       .update(sessionScores)
       .set({
-        rawScore: roundedPoints.get(s.playerId) ?? 0,
+        rawScore: finalPoints.get(s.playerId) ?? 0,
         rank: r?.rank ?? null,
         rankChip: r?.rankChip ?? null,
       })

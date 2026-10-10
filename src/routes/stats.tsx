@@ -310,7 +310,9 @@ statsRoutes.get("/players/:id", async (c) => {
                   </tr>
                   <tr>
                     <td>振り込み率</td>
-                    <td>{fmtPercent(traits.dealInRate)}</td>
+                    <td>
+                      {fmtPercent(traits.dealInRate)}（{traits.dealInCount}回）
+                    </td>
                   </tr>
                   <tr>
                     <td>リーチ率</td>

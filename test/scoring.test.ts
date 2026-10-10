@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  roundPointsGosha,
+  roundSotenGosha,
+  computeFinalPoints,
   computeRankAndChips,
   computeYakumanChips,
   sumScores,
@@ -11,30 +12,61 @@ import {
 // アプリ全体で保存・集計する点数の単位は「ポイント」＝配給原点(25000点=25ポイント)からの
 // 増減（差分）。例: 最終所持点32000点なら+7ポイント。1半荘の4人分は必ず合計0になる。
 
-describe("roundPointsGosha", () => {
-  it("小数第1位が6〜9なら切り上げる", () => {
-    expect(roundPointsGosha(7.7)).toBe(8);
-    expect(roundPointsGosha(2.7)).toBe(3);
-    expect(roundPointsGosha(0.6)).toBe(1);
+describe("roundSotenGosha", () => {
+  it("1000点単位で五捨六入する（余り600以上で切り上げ、500以下は切り捨て）", () => {
+    expect(roundSotenGosha(26500)).toBe(26000);
+    expect(roundSotenGosha(26600)).toBe(27000);
+    expect(roundSotenGosha(32500)).toBe(32000);
+    expect(roundSotenGosha(24600)).toBe(25000);
+    expect(roundSotenGosha(30000)).toBe(30000);
+    expect(roundSotenGosha(0)).toBe(0);
   });
 
-  it("小数第1位が0〜5なら切り捨てる（通常の四捨五入と異なりちょうど5も切り捨て）", () => {
-    expect(roundPointsGosha(-0.3)).toBe(0);
-    expect(roundPointsGosha(-7.1)).toBe(-7);
-    expect(roundPointsGosha(0.5)).toBe(0);
-    expect(roundPointsGosha(-0.5)).toBe(0);
+  it("マイナス（箱下）も数直線上で1つ下の1000点を基準に同じルールで丸める", () => {
+    expect(roundSotenGosha(-3500)).toBe(-4000);
+    expect(roundSotenGosha(-3400)).toBe(-3000);
+    expect(roundSotenGosha(-3600)).toBe(-4000);
+    expect(roundSotenGosha(-500)).toBe(-1000);
+    expect(roundSotenGosha(-400)).toBe(0);
+  });
+});
+
+describe("computeFinalPoints", () => {
+  it("2〜4位は丸めた素点から30000を引き、1位は残り3人の合計の符号反転（総取り）", () => {
+    const points = computeFinalPoints([
+      { playerId: 1, soten: 41300, rank: 1 },
+      { playerId: 2, soten: 30600, rank: 2 },
+      { playerId: 3, soten: 18500, rank: 3 },
+      { playerId: 4, soten: 9600, rank: 4 },
+    ]);
+    expect(points.get(2)).toBe(1);
+    expect(points.get(3)).toBe(-12);
+    expect(points.get(4)).toBe(-20);
+    expect(points.get(1)).toBe(31);
   });
 
-  it("整数はそのまま返す", () => {
-    expect(roundPointsGosha(5)).toBe(5);
-    expect(roundPointsGosha(0)).toBe(0);
-    expect(roundPointsGosha(-3)).toBe(-3);
+  it("4人分の合計は常に0になる（箱下を含む）", () => {
+    const points = computeFinalPoints([
+      { playerId: 1, soten: 58700, rank: 1 },
+      { playerId: 2, soten: 26500, rank: 2 },
+      { playerId: 3, soten: 18300, rank: 3 },
+      { playerId: 4, soten: -3500, rank: 4 },
+    ]);
+    expect(points.get(2)).toBe(-4);
+    expect(points.get(3)).toBe(-12);
+    expect(points.get(4)).toBe(-34);
+    expect(points.get(1)).toBe(50);
+    expect([...points.values()].reduce((a, b) => a + b, 0)).toBe(0);
   });
 
-  it("四人分を独立に丸めると合計が0からずれることがある（丸め誤差の実例）", () => {
-    const rounded = [7.7, -0.3, -0.3, -7.1].map(roundPointsGosha);
-    expect(rounded).toEqual([8, 0, 0, -7]);
-    expect(rounded.reduce((a, b) => a + b, 0)).toBe(1); // 0にならない＝確定時に手修正が必要になるケース
+  it("全員25000点なら2〜4位は-5、1位は+15", () => {
+    const points = computeFinalPoints([
+      { playerId: 1, soten: 25000, rank: 1 },
+      { playerId: 2, soten: 25000, rank: 2 },
+      { playerId: 3, soten: 25000, rank: 3 },
+      { playerId: 4, soten: 25000, rank: 4 },
+    ]);
+    expect([1, 2, 3, 4].map((id) => points.get(id))).toEqual([15, -5, -5, -5]);
   });
 });
 
@@ -148,7 +180,29 @@ describe("computeLiveScores", () => {
     expect(scores).toEqual([-2000, 6000, -2000, -2000]);
   });
 
-  it("子のツモ: 親がpoints/2、残り2人の子がpoints/4ずつ支払う", () => {
+  it("子のツモ: 点数表どおりに親・子の支払いを決める（1100点＝子300・親500）", () => {
+    const scores = computeLiveScores([
+      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: 0, points: 1100, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+    ]);
+    expect(scores).toEqual([-500, 1100, -300, -300]);
+  });
+
+  it("子のツモ: 2700点は子700・親1300（単純な1:2の比率にならない）", () => {
+    const scores = computeLiveScores([
+      { winType: "tsumo", winnerSeat: 2, loserSeat: null, dealerSeat: 3, points: 2700, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+    ]);
+    expect(scores).toEqual([-700, -700, 2700, -1300]);
+  });
+
+  it("子のツモ: 表にない合計は計算式で近似し、4人の合計は0を保つ", () => {
+    const scores = computeLiveScores([
+      { winType: "tsumo", winnerSeat: 1, loserSeat: null, dealerSeat: 0, points: 1000, honba: 0, riichiSeats: [], tenpaiSeats: [] },
+    ]);
+    expect(scores).toEqual([-400, 1000, -300, -300]);
+    expect(scores.reduce((a, b) => a + b, 0)).toBe(0);
+  });
+
+  it("子のツモ: 満貫は子2000・親4000", () => {
     const scores = computeLiveScores([
       { winType: "tsumo", winnerSeat: 3, loserSeat: null, dealerSeat: 2, points: 5200, honba: 0, riichiSeats: [], tenpaiSeats: [] },
     ]);

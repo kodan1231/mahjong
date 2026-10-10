@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeScoreTable } from "../src/lib/scoreTable";
+import { computeScoreTable, resolveTsumoPayment } from "../src/lib/scoreTable";
 
 // 麻雀の点数早見表でよく知られた基準値との突き合わせ（誤りがあると実際の対局で誤解を招くため厳密に検証する）。
 describe("computeScoreTable", () => {
@@ -66,5 +66,46 @@ describe("computeScoreTable", () => {
 
   it("符は60符までに絞ってある（25符は削除済み）", () => {
     expect(table.fuRows).toEqual([20, 30, 40, 50, 60]);
+  });
+});
+
+describe("resolveTsumoPayment", () => {
+  it("子のツモは点数表から子・親の支払いを引く", () => {
+    const cases: [number, number, number][] = [
+      [1100, 300, 500],
+      [1500, 400, 700],
+      [1600, 400, 800],
+      [2000, 500, 1000],
+      [2700, 700, 1300],
+      [3200, 800, 1600],
+      [4000, 1000, 2000],
+      [5200, 1300, 2600],
+      [7900, 2000, 3900],
+      [8000, 2000, 4000],
+      [12000, 3000, 6000],
+      [32000, 8000, 16000],
+    ];
+    for (const [total, other, dealer] of cases) {
+      expect(resolveTsumoPayment(total, false)).toEqual({ nonDealerPays: other, dealerPays: dealer, matched: true });
+    }
+  });
+
+  it("親のツモは点数表からオールの額を引く", () => {
+    for (const [total, each] of [
+      [1500, 500],
+      [3900, 1300],
+      [7800, 2600],
+      [11700, 3900],
+      [12000, 4000],
+      [48000, 16000],
+    ] as const) {
+      expect(resolveTsumoPayment(total, true)).toEqual({ nonDealerPays: each, dealerPays: null, matched: true });
+    }
+  });
+
+  it("表にない合計は計算式で近似してmatched: falseを返す", () => {
+    expect(resolveTsumoPayment(1000, false)).toEqual({ nonDealerPays: 300, dealerPays: 400, matched: false });
+    expect(resolveTsumoPayment(64000, false)).toEqual({ nonDealerPays: 16000, dealerPays: 32000, matched: false });
+    expect(resolveTsumoPayment(1000, true)).toEqual({ nonDealerPays: 400, dealerPays: null, matched: false });
   });
 });

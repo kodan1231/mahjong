@@ -1,3 +1,5 @@
+import { resolveTsumoPayment } from "./scoreTable";
+
 /**
  * アプリ全体で保存・集計する点数の単位は「ポイント」＝配給原点(25000点=25ポイント)からの
  * 増減（差分）。例: 最終所持点32000点なら +7ポイント、21000点なら -4ポイント。
@@ -22,22 +24,47 @@ export const ROUND_OPTIONS = ["東1局", "東2局", "東3局", "東4局", "南1�
 // 着順ごとの固定チップ (1位+3 / 2位0 / 3位-1 / 4位-2)
 const RANK_CHIP_TABLE: Record<number, number> = { 1: 3, 2: 0, 3: -1, 4: -2 };
 
+// 最終集計は「25000点持ち・30000点返し」。2〜4位は素点を丸めて30000点を引き、
+// 1位は2〜4位の合計の符号を反転した値（オカ＝(30000-25000)×4人分を総取り）にする。
+export const RETURN_SCORE = 30000;
+// 1半荘の4人分の素点の合計（25000点×4人）。確認画面ではこれと一致しないと確定させない。
+export const TOTAL_SOTEN = 100000;
+
 /**
- * 半荘確定時、手入力された精密なポイント（0.1刻み＝素点100点単位）を、日別/年度別/通算の
- * 集計で使う整数ポイント（1000点単位）に変換する。「五捨六入」（小数第1位が0〜5なら切り捨て、
- * 6〜9なら切り上げ。通常の四捨五入と異なりちょうど5は切り捨てる）で丸める。
- * 例: +7.7 → +8 / -0.3 → 0 / -7.1 → -7 / +2.7 → +3。
- * 順位・チップ・4人合計0チェックは常にこの丸め前の精密な値で行う（このポイント自体は
- * 順位に関与しない）。丸め後の4人分の合計が0にならないことがある（丸め誤差。100点単位の
- * 精密値は必ず合計0になるが、各自を独立に丸めるとずれうるため）ので、確定時に別途チェックし、
- * ずれていれば1位の丸め後ポイントを手修正してもらう。
+ * 素点を1000点単位に「五捨六入」する。数直線上で1つ下の1000点に切り捨て、その余りが
+ * 600以上なら切り上げる（500以下は切り捨て）。マイナスの素点（箱下）も同じ数直線ルールで扱う。
+ * 例: 26500→26000 / 26600→27000 / -3500→-4000 / -3400→-3000 / -3600→-4000。
  */
-export function roundPointsGosha(points: number): number {
-  const tenths = Math.round(points * 10);
-  const whole = Math.trunc(tenths / 10);
-  const remainder = Math.abs(tenths - whole * 10);
-  // whole自体は-0.x〜0.xの入力でMath.trunc(-0)=-0になりうるため、+0で正規化する。
-  return (remainder <= 5 ? whole : whole + Math.sign(tenths)) + 0;
+export function roundSotenGosha(soten: number): number {
+  const floor = Math.floor(soten / 1000) * 1000;
+  return soten - floor >= 600 ? floor + 1000 : floor;
+}
+
+export interface FinalPointInput {
+  playerId: number;
+  soten: number;
+  /** computeRankAndChipsで決めた着順（1〜4） */
+  rank: number;
+}
+
+/**
+ * 半荘確定時の集計用ポイント（30000点返し）を求める。
+ * 2〜4位: roundSotenGosha(素点) / 1000 - 30。1位: 2〜4位の合計の符号を反転した値。
+ * このため4人分の合計は常に0になる（丸め誤差の手修正は不要）。
+ * 例: 41300/30600/18500/9600 → 2位+1・3位-12・4位-20、1位は+31。
+ */
+export function computeFinalPoints(entries: FinalPointInput[]): Map<number, number> {
+  const result = new Map<number, number>();
+  let othersSum = 0;
+  for (const e of entries) {
+    if (e.rank === 1) continue;
+    const point = (roundSotenGosha(e.soten) - RETURN_SCORE) / 1000;
+    result.set(e.playerId, point);
+    othersSum += point;
+  }
+  const top = entries.find((e) => e.rank === 1);
+  if (top) result.set(top.playerId, -othersSum + 0);
+  return result;
 }
 
 export interface PlayerScore {
@@ -121,9 +148,9 @@ export interface LiveHandEntry {
  *   （ツモの本場分は親子の配分比とは無関係に常に均等）。pointsが無い（役の点数を未入力の）局では
  *   本場分も含めて加算しない。
  * - ロン: 和了者+ (points+本場分)、対象(放銃者)- (points+本場分) のシンプルな授受
- * - ツモ: pointsには和了者が受け取る「役由来の合計」を入力してもらう前提で、親かどうかに応じた比率
- *   （親のツモは3人が均等払い、子のツモは親が半分・残り2人が1/4ずつ）で各家の支払い額を求め、
- *   本場分（3人均等）を上乗せする
+ * - ツモ: pointsには和了者が受け取る「役由来の合計」を入力してもらう前提で、点数表
+ *   （resolveTsumoPayment）から各家の支払い額を求め（例: 子の1100点ツモ＝子300・親500）、
+ *   本場分（3人均等）を上乗せする。表にない合計は計算式で近似する
  * - 流局: リーチ供託に加え、テンパイ料（ノーテン罰符）合計3000点をテンパイ者に均等分配し、
  *   ノーテン者から均等に徴収する（テンパイ1人:+3000/他-1000ずつ、2人:各+1500/各-1500、
  *   3人:各+1000/-3000、0人・4人:授受なし）
@@ -168,16 +195,15 @@ export function computeLiveScores(hands: LiveHandEntry[]): number[] {
     } else if (h.winType === "tsumo" && h.winnerSeat != null) {
       const dealerSeat = h.dealerSeat ?? 0;
       const honbaShare = 100 * h.honba;
-      scores[h.winnerSeat]! += h.points + honbaBonus;
+      const payment = resolveTsumoPayment(h.points, h.winnerSeat === dealerSeat);
       for (let seat = 0; seat < 4; seat++) {
         if (seat === h.winnerSeat) continue;
-        if (h.winnerSeat === dealerSeat) {
-          scores[seat]! -= h.points / 3 + honbaShare;
-        } else if (seat === dealerSeat) {
-          scores[seat]! -= h.points / 2 + honbaShare;
-        } else {
-          scores[seat]! -= h.points / 4 + honbaShare;
-        }
+        const pays =
+          (seat === dealerSeat && payment.dealerPays != null ? payment.dealerPays : payment.nonDealerPays) +
+          honbaShare;
+        scores[seat]! -= pays;
+        // 和了者は実際に支払われた額を受け取る（表にない合計を近似した場合も4人の合計を0に保つため）
+        scores[h.winnerSeat]! += pays;
       }
     }
   }

@@ -9,13 +9,6 @@ import { resolveTsumoPayment } from "./scoreTable";
  */
 export const ORIGIN_SCORE = 25;
 
-/**
- * まとめて入力画面で箱割れを自動判定する閾値（ポイント）。この値以下なら自動的に
- * isHakoware: true として保存する。当初は「持ち点が0未満＝配給原点(25)を下回る」を基準に
- * -25としていたが、ユーザーの実運用に合わせて-31に変更（2026-09-16）。
- */
-export const HAKOWARE_AUTO_THRESHOLD = -31;
-
 // 半荘＝東1〜4局＋南1〜4局の8局。インデックス%4が起家からの席順（＝その局の親）に対応する
 // （東1局と南1局はどちらも起家が親、というように東場・南場で同じ並びが繰り返されるため）。
 // hand_logs.roundLabelはこの配列の値と完全一致している前提で扱う（days.tsx・aggregate.tsで共用）。

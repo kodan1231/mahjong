@@ -11,7 +11,6 @@ import {
   yakumanEvents,
   yakumanEventTargets,
   handLogs,
-  photoUploads,
 } from "../db/schema";
 import { Layout } from "../views/layout";
 import { Signed, TotalsTable, TabBar } from "../views/components";
@@ -23,7 +22,6 @@ import {
   RETURN_SCORE,
   TOTAL_SOTEN,
   ORIGIN_SCORE,
-  HAKOWARE_AUTO_THRESHOLD,
   ROUND_OPTIONS,
   computeLiveScores,
   computeNextRoundState,
@@ -508,7 +506,6 @@ async function loadDayDetail(db: Db, dayId: number) {
           playerId: sessionScores.playerId,
           name: players.name,
           rawScore: sessionScores.rawScore,
-          isHakoware: sessionScores.isHakoware,
           rank: sessionScores.rank,
           rankChip: sessionScores.rankChip,
         })
@@ -1609,7 +1606,6 @@ dayRoutes.post("/days/:id/sessions/:sid/delete", requireAdmin, async (c) => {
   // 関連レコードを先に削除・切り離してから半荘本体を削除する
   await db.delete(sessionScores).where(eq(sessionScores.gameSessionId, sessionId));
   await db.delete(handLogs).where(eq(handLogs.gameSessionId, sessionId));
-  await db.delete(photoUploads).where(eq(photoUploads.gameSessionId, sessionId));
   await db
     .update(yakumanEvents)
     .set({ gameSessionId: null })
@@ -1661,7 +1657,7 @@ dayRoutes.get("/days/:id/edit", requireAdmin, async (c) => {
       </div>
       <div class="card">
         <h2>対局日の削除</h2>
-        <p>この対局日の半荘・スコア・役満・局メモ・写真をすべて削除します。登録を間違えた対局日を消す場合に使ってください。この操作は取り消せません。</p>
+        <p>この対局日の半荘・スコア・役満・局メモをすべて削除します。登録を間違えた対局日を消す場合に使ってください。この操作は取り消せません。</p>
         <form
           method="post"
           action={`/days/${dayId}/delete`}
@@ -1689,7 +1685,6 @@ dayRoutes.post("/days/:id/delete", requireAdmin, async (c) => {
   if (sessionIds.length > 0) {
     await db.delete(sessionScores).where(inArray(sessionScores.gameSessionId, sessionIds));
     await db.delete(handLogs).where(inArray(handLogs.gameSessionId, sessionIds));
-    await db.delete(photoUploads).where(inArray(photoUploads.gameSessionId, sessionIds));
   }
 
   const yakumanRows = await db.select({ id: yakumanEvents.id }).from(yakumanEvents).where(eq(yakumanEvents.dayId, dayId));
@@ -1744,8 +1739,8 @@ dayRoutes.post("/days/:id/edit", requireAdmin, async (c) => {
 
 // ---------- まとめて入力（スプレッドシート風の一括登録・過去履歴のバックフィル向け） ----------
 // 半荘ごとの座席登録→局メモ入力→確認、という通常フローとは別に、
-// 「行＝半荘、列＝参加者」の表に直接ポイント（素点÷1000）を入力して一括保存できる画面。
-// 箱割れ・役満・局メモはここでは扱わず、通常の対局日詳細ページから編集する。
+// 「行＝半荘、列＝参加者」の表に直接ポイント（4人合計0の最終ポイント）を入力して一括保存できる画面。
+// 役満・局メモはここでは扱わず、通常の対局日詳細ページから編集する。
 
 const SHEET_EXTRA_BLANK_ROWS = 8;
 
@@ -2131,7 +2126,6 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
           seatIndex,
           playerId: e.playerId,
           rawScore: e.rawScore,
-          isHakoware: e.rawScore <= HAKOWARE_AUTO_THRESHOLD,
         })),
       );
       continue;
@@ -2165,7 +2159,6 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
         rawScore: r.rawScore,
         rank: r.rank,
         rankChip: r.rankChip,
-        isHakoware: r.rawScore <= HAKOWARE_AUTO_THRESHOLD,
       })),
     );
   }
@@ -2261,7 +2254,6 @@ dayRoutes.post("/days/:id/sheet", requireAdmin, async (c) => {
         rawScore: pe.rawScore,
         rank: null,
         rankChip: chipEntries.find((ce) => ce.playerId === pe.playerId)!.rawScore,
-        isHakoware: pe.rawScore <= HAKOWARE_AUTO_THRESHOLD,
       })),
     );
 

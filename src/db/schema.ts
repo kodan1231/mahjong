@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, blob, uniqueIndex, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex, index } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const players = sqliteTable("players", {
@@ -45,7 +45,6 @@ export const gameSessions = sqliteTable(
     dayId: integer("day_id").notNull().references(() => days.id),
     seq: integer("seq").notNull(), // 何半荘目か
     status: text("status", { enum: ["pending", "confirmed"] }).notNull().default("pending"),
-    displayMode: text("display_mode", { enum: ["raw", "diff"] }).notNull().default("raw"),
     playedAt: text("played_at"),
     // 小計ブロック（複数半荘分をまとめて登録する行）の任意ラベル。例:「前半」。通常の半荘では未使用
     memo: text("memo"),
@@ -63,9 +62,8 @@ export const sessionScores = sqliteTable(
     gameSessionId: integer("game_session_id").notNull().references(() => gameSessions.id),
     seatIndex: integer("seat_index").notNull(), // 0-3
     playerId: integer("player_id").notNull().references(() => players.id),
-    // 「ポイント」単位（実際の素点÷1000。例: 素点32000点 → 32ポイント）で保存する。null until confirmed
+    // 集計用ポイント（確認画面は30000点返しで換算、まとめて入力は入力値そのまま。4人合計0）。null until confirmed
     rawScore: real("raw_score"),
-    isHakoware: integer("is_hakoware", { mode: "boolean" }).notNull().default(false),
     rank: integer("rank"), // 1-4, null until confirmed
     rankChip: integer("rank_chip"), // null until confirmed
   },
@@ -141,19 +139,3 @@ export const handLogs = sqliteTable(
     gameSessionIdx: index("hand_logs_game_session_id_idx").on(t.gameSessionId),
   }),
 );
-
-export const photoUploads = sqliteTable("photo_uploads", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  gameSessionId: integer("game_session_id").references(() => gameSessions.id),
-  // 写真本体はR2ではなくD1にBLOBとして保存する（R2の有効化にクレジットカード登録が必要なため見送り）。
-  // クライアント側で長辺1600px程度に縮小してからアップロードしているため、D1の1行あたりサイズ上限には収まる想定。
-  imageData: blob("image_data", { mode: "buffer" }).notNull(),
-  contentType: text("content_type").notNull(),
-  ocrRawJson: text("ocr_raw_json"),
-  createdAt: text("created_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
-});
-
-export const settings = sqliteTable("settings", {
-  key: text("key").primaryKey(),
-  value: text("value").notNull(),
-});

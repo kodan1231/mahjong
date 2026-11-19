@@ -7,7 +7,37 @@ import {
   sumScores,
   computeLiveScores,
   computeNextRoundState,
+  lastRoundResult,
+  type LiveHandEntry,
 } from "../src/lib/scoring";
+
+describe("ダブロン", () => {
+  // 東2局(親=南家1)1本場。西家2がリーチ、北家3が放銃し、起家0(5200)と南家1(2000・親)がダブロン。
+  // 放銃者3から見て下家側に近いのは起家0なので、本場・リーチ棒は起家0が受け取る。
+  const base = { winType: "ron", roundIndex: 1, dealerSeat: 1, honba: 1, loserSeat: 3, tenpaiSeats: [] };
+  const first: LiveHandEntry = { ...base, winnerSeat: 1, points: 2000, riichiSeats: [2] };
+  const second: LiveHandEntry = { ...base, winnerSeat: 0, points: 5200, riichiSeats: [2] };
+
+  it("本場・リーチ棒は頭ハネの1人だけが受け取り、リーチは1回だけ引く（入力順に依存しない）", () => {
+    const expected = [5200 + 300 + 1000, 2000, -1000, -(5200 + 300 + 2000)];
+    expect(computeLiveScores([first, second])).toEqual(expected);
+    expect(computeLiveScores([second, { ...first, riichiSeats: [] }])).toEqual(expected);
+  });
+
+  it("どちらかの和了者が親なら連荘（同じ局・本場+1）", () => {
+    const toProgress = (h: LiveHandEntry) => ({
+      winType: h.winType,
+      roundIndex: 1,
+      honba: 1,
+      dealerSeat: 1,
+      winnerSeat: h.winnerSeat,
+      loserSeat: h.loserSeat,
+      tenpaiSeats: [],
+    });
+    expect(computeNextRoundState([toProgress(first), toProgress(second)], 7)).toEqual({ roundIndex: 1, honba: 2 });
+    expect(lastRoundResult([toProgress(second), toProgress(first)])?.dealerContinuing).toBe(true);
+  });
+});
 
 // アプリ全体で保存・集計する点数の単位は「ポイント」＝配給原点(25000点=25ポイント)からの
 // 増減（差分）。例: 最終所持点32000点なら+7ポイント。1半荘の4人分は必ず合計0になる。

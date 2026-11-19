@@ -25,7 +25,7 @@ import {
   ROUND_OPTIONS,
   computeLiveScores,
   computeNextRoundState,
-  isDealerContinuing,
+  lastRoundResult,
   type LiveHandEntry,
   type RoundProgressEntry,
 } from "../lib/scoring";
@@ -78,6 +78,7 @@ function resolveLiveHandEntries(
     const roundIndex = h.roundLabel ? ROUND_OPTIONS.indexOf(h.roundLabel as (typeof ROUND_OPTIONS)[number]) : -1;
     return {
       winType: h.winType,
+      roundIndex: roundIndex >= 0 ? roundIndex : null,
       winnerSeat: h.winnerPlayerId != null ? (seatOfPlayer.get(h.winnerPlayerId) ?? null) : null,
       loserSeat: h.loserPlayerId != null ? (seatOfPlayer.get(h.loserPlayerId) ?? null) : null,
       dealerSeat: roundIndex >= 0 ? roundIndex % 4 : null,
@@ -98,6 +99,7 @@ function resolveRoundProgressEntries(
     roundLabel: string | null;
     honba: number;
     winnerPlayerId: number | null;
+    loserPlayerId: number | null;
     tenpaiPlayerIds: string | null;
   }[],
   seatPlayerIds: (number | null)[],
@@ -126,6 +128,7 @@ function resolveRoundProgressEntries(
       honba: h.honba,
       dealerSeat: roundIndex % 4,
       winnerSeat: h.winnerPlayerId != null ? (seatOfPlayer.get(h.winnerPlayerId) ?? null) : null,
+      loserSeat: h.loserPlayerId != null ? (seatOfPlayer.get(h.loserPlayerId) ?? null) : null,
       tenpaiSeats,
     });
   }
@@ -236,6 +239,7 @@ function HandLogForm({
     roundLabel: string | null;
     honba: number;
     winnerPlayerId: number | null;
+    loserPlayerId: number | null;
     tenpaiPlayerIds: string | null;
   }[];
   editingHand?: EditingHand;
@@ -338,6 +342,29 @@ function HandLogForm({
             ))}
           </div>
         </div>
+
+        {!editingHand && (
+          <div id={`double-ron-field-${uid}`}>
+            <label class="choice-btn" style="display:inline-flex">
+              <input type="checkbox" name="doubleRon" value="1" id={`double-ron-check-${uid}`} /> ダブロン
+            </label>
+            <div id={`double-ron-detail-${uid}`} hidden>
+              <label>2人目の和了者</label>
+              <div class="choice-group choice-group-compact">
+                {seatPlayers.map((p) => (
+                  <label class="choice-btn">
+                    <input type="radio" name="winner2PlayerId" value={p.playerId} /> {p.name}
+                  </label>
+                ))}
+              </div>
+              <label for={`points2-input-${uid}`}>2人目の点数（役の点数のみ）</label>
+              <input type="number" inputmode="numeric" pattern="[0-9]*" step="100" name="points2" id={`points2-input-${uid}`} />
+              <p style="margin:4px 0 0; font-size:0.85rem">
+                本場・リーチ棒は頭ハネ（放銃者の下家側に近い方）が受け取ります。下の点数・ドラ・役は1人目の分です。
+              </p>
+            </div>
+          </div>
+        )}
 
         <div id={`target-field-${uid}`}>
           <label>対象</label>
@@ -451,7 +478,15 @@ function HandLogForm({
                 targetField.hidden = !(val === 'ron' || val === 'chombo');
                 tenpaiField.hidden = val !== 'draw';
                 doraField.hidden = !(val === 'ron' || val === 'tsumo');
+                if (doubleRonField) {
+                  doubleRonField.hidden = val !== 'ron';
+                  doubleRonDetail.hidden = !(val === 'ron' && doubleRonCheck.checked);
+                }
               }
+              const doubleRonField = document.getElementById('double-ron-field-' + uid);
+              const doubleRonCheck = document.getElementById('double-ron-check-' + uid);
+              const doubleRonDetail = document.getElementById('double-ron-detail-' + uid);
+              if (doubleRonCheck) doubleRonCheck.addEventListener('change', updateResultFields);
               document.querySelectorAll('#result-group-' + uid + ' input[name=winType]').forEach((el) => {
                 el.addEventListener('change', updateResultFields);
               });
@@ -1080,10 +1115,9 @@ dayRoutes.get("/days/:id/sessions/:sid", requireAdmin, async (c) => {
   const currentDealerSeat = nextRoundState.roundIndex % 4;
   // 南4局が親の連荘ではなく決着（親交代、または流局で親が非テンパイ）で終わったら、
   // その半荘は終了とみなす。
-  const relevantProgress = roundProgress.filter((h) => h.winType !== "chombo");
-  const lastProgress = relevantProgress[relevantProgress.length - 1];
+  const lastProgress = lastRoundResult(roundProgress);
   const isDone =
-    !!lastProgress && lastProgress.roundIndex === ROUND_OPTIONS.length - 1 && !isDealerContinuing(lastProgress);
+    !!lastProgress && lastProgress.roundIndex === ROUND_OPTIONS.length - 1 && !lastProgress.dealerContinuing;
 
   const editHandId = c.req.query("edit") ? Number(c.req.query("edit")) : null;
   const editingHand = editHandId != null ? hands.find((h) => h.id === editHandId) : undefined;
@@ -1550,7 +1584,32 @@ dayRoutes.post("/days/:id/sessions/:sid/hands", requireAdmin, async (c) => {
   const db = getDb(c.env);
   const body = await c.req.parseBody({ all: true });
 
-  await db.insert(handLogs).values({ gameSessionId: sessionId, ...parseHandLogBody(body) });
+  const hand = parseHandLogBody(body);
+  await db.insert(handLogs).values({ gameSessionId: sessionId, ...hand });
+
+  // ダブロン: 2人目の和了者の分を、同じ局・本場・放銃者・リーチ/鳴きの別の行として続けて登録する
+  // （連続するこの2行をscoring.tsのisDoubleRonContinuationが1局のダブロンとして扱う）。
+  const winner2PlayerId = body.winner2PlayerId ? Number(body.winner2PlayerId) : null;
+  if (
+    body.doubleRon &&
+    hand.winType === "ron" &&
+    hand.loserPlayerId != null &&
+    winner2PlayerId != null &&
+    winner2PlayerId !== hand.winnerPlayerId &&
+    winner2PlayerId !== hand.loserPlayerId
+  ) {
+    const points2 = body.points2 ? Number(body.points2) : null;
+    await db.insert(handLogs).values({
+      gameSessionId: sessionId,
+      ...hand,
+      winnerPlayerId: winner2PlayerId,
+      points: Number.isFinite(points2) ? points2 : null,
+      yakuText: null,
+      omoteDoraCount: null,
+      uraDoraCount: null,
+      akaDoraCount: null,
+    });
+  }
 
   const [session] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId));
   if (session?.status === "pending") {

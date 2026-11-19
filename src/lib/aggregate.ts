@@ -10,7 +10,7 @@ import {
   yakumanEventTargets,
   handLogs,
 } from "../db/schema";
-import { computeYakumanChips, ROUND_OPTIONS } from "./scoring";
+import { computeYakumanChips, isDoubleRonContinuation, ROUND_OPTIONS } from "./scoring";
 
 export interface PlayerTotal {
   playerId: number;
@@ -623,16 +623,41 @@ export async function computePlayerTraits(db: Db, playerId: number): Promise<Pla
     .orderBy(asc(handLogs.gameSessionId), asc(handLogs.id));
   // チョンボは同じ局をやり直す扱いなので、参加局数・各種比率の対象から除く。
   const countedHands = handRows.filter((h) => h.winType !== "chombo");
-  const handCount = countedHands.length;
+  // ダブロン（同じ局を和了者ごとに2行で記録）は1局として数えるため、2行目を局単位の集計
+  // （参加局数・リーチ・鳴き・振り込み）から除く。和了関連は和了者ごとの行をそのまま使う。
+  const toComparable = (h: (typeof countedHands)[number]) => ({
+    winType: h.winType,
+    roundIndex: h.roundLabel ? ROUND_OPTIONS.indexOf(h.roundLabel as (typeof ROUND_OPTIONS)[number]) : null,
+    honba: h.honba,
+    winnerSeat: h.winnerPlayerId,
+    loserSeat: h.loserPlayerId,
+  });
+  const roundGroups: (typeof countedHands)[] = [];
+  countedHands.forEach((h, i) => {
+    const prev = countedHands[i - 1];
+    if (prev && prev.gameSessionId === h.gameSessionId && isDoubleRonContinuation(toComparable(prev), toComparable(h))) {
+      roundGroups[roundGroups.length - 1]!.push(h);
+    } else {
+      roundGroups.push([h]);
+    }
+  });
+  // リーチ・鳴きはダブロンの2行のどちらかに記録されていれば、その局でしたものとして1回数える
+  const roundHands = roundGroups.map((g) => ({
+    winType: g[0]!.winType,
+    loserPlayerId: g[0]!.loserPlayerId,
+    riichiPlayerIds: JSON.stringify(g.flatMap((h) => parsePlayerIdList(h.riichiPlayerIds))),
+    nakiPlayerIds: JSON.stringify(g.flatMap((h) => parsePlayerIdList(h.nakiPlayerIds))),
+  }));
+  const handCount = roundHands.length;
 
   const winHands = countedHands.filter(
     (h) => h.winnerPlayerId === playerId && (h.winType === "ron" || h.winType === "tsumo"),
   );
   const winCount = winHands.length;
 
-  const riichiCount = countedHands.filter((h) => parsePlayerIdList(h.riichiPlayerIds).includes(playerId)).length;
-  const nakiCount = countedHands.filter((h) => parsePlayerIdList(h.nakiPlayerIds).includes(playerId)).length;
-  const dealInCount = countedHands.filter((h) => h.winType === "ron" && h.loserPlayerId === playerId).length;
+  const riichiCount = roundHands.filter((h) => parsePlayerIdList(h.riichiPlayerIds).includes(playerId)).length;
+  const nakiCount = roundHands.filter((h) => parsePlayerIdList(h.nakiPlayerIds).includes(playerId)).length;
+  const dealInCount = roundHands.filter((h) => h.winType === "ron" && h.loserPlayerId === playerId).length;
   const tsumoCount = winHands.filter((h) => h.winType === "tsumo").length;
   // 一発率はtenhou等の集計サイトに倣い「立直した回数」を分母にする（門前でロン/ツモした回数ではない）。
   // このプレイヤーが立直した局のうち、そのまま自身が「一発」役付きで和了した回数を数える。

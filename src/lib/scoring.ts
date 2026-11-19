@@ -113,8 +113,62 @@ export function computeRankAndChips(scores: PlayerScore[]): RankAndChipsResult {
   return { ranked, hasTie };
 }
 
+/**
+ * ダブロン（同じ打牌で2人がロン）は局メモ上は和了者ごとに2行続けて記録する。直前の行と
+ * 「どちらもロン・同じ局・同じ本場・同じ放銃者・和了者が別」なら、同じ局のダブロンの続きとみなす。
+ * 通常の進行では、子のロンなら次の局へ進み、親のロンなら本場が増えるため、この条件を満たす連続した
+ * 2行はダブロン以外では発生しない。
+ */
+export interface DoubleRonComparable {
+  winType: string;
+  roundIndex?: number | null;
+  dealerSeat?: number | null;
+  honba: number;
+  winnerSeat: number | null;
+  loserSeat?: number | null;
+}
+
+export function isDoubleRonContinuation(prev: DoubleRonComparable, cur: DoubleRonComparable): boolean {
+  return (
+    prev.winType === "ron" &&
+    cur.winType === "ron" &&
+    (prev.roundIndex ?? null) === (cur.roundIndex ?? null) &&
+    (prev.dealerSeat ?? null) === (cur.dealerSeat ?? null) &&
+    prev.honba === cur.honba &&
+    prev.loserSeat != null &&
+    prev.loserSeat === cur.loserSeat &&
+    prev.winnerSeat != null &&
+    cur.winnerSeat != null &&
+    prev.winnerSeat !== cur.winnerSeat
+  );
+}
+
+/**
+ * 連続する局メモを「1局」単位にまとめる（ダブロンの2行を1グループにする。それ以外は1行1グループ）。
+ * チョンボは同じ局のやり直し扱いで判定から除くため、呼び出し側で除外してから渡すこと。
+ */
+export function groupHandsByRound<T extends DoubleRonComparable>(hands: T[]): T[][] {
+  const groups: T[][] = [];
+  for (const h of hands) {
+    const current = groups[groups.length - 1];
+    const prev = current?.[current.length - 1];
+    if (current && prev && isDoubleRonContinuation(prev, h)) current.push(h);
+    else groups.push([h]);
+  }
+  return groups;
+}
+
+/**
+ * ダブロン時に本場・供託（リーチ棒）を受け取る和了者（頭ハネ＝放銃者から見て下家側に近い方）の座席。
+ */
+export function headWinnerSeat(winnerSeats: number[], loserSeat: number): number {
+  return [...winnerSeats].sort((a, b) => ((a - loserSeat + 4) % 4) - ((b - loserSeat + 4) % 4))[0]!;
+}
+
 export interface LiveHandEntry {
   winType: string;
+  /** この局のROUND_OPTIONS上のインデックス(0-7)。ダブロンの判定に使う。不明ならnull */
+  roundIndex?: number | null;
   /** 和了者の座席(0-3)。ロン・ツモ以外はnull */
   winnerSeat: number | null;
   /** ロン時の対象（放銃者）の座席。ロン以外はnull */
@@ -148,14 +202,38 @@ export interface LiveHandEntry {
  *   ノーテン者から均等に徴収する（テンパイ1人:+3000/他-1000ずつ、2人:各+1500/各-1500、
  *   3人:各+1000/-3000、0人・4人:授受なし）
  * - チョンボ: 同じ局をやり直す扱いのため、リーチ供託も含めこのスコアには一切反映しない
+ * - ダブロン（isDoubleRonContinuationで判定した連続2行）: それぞれの和了者が役の点数を受け取るが、
+ *   本場・供託は頭ハネの和了者（headWinnerSeat）だけが受け取る。リーチは2行のどちらに記録されていても
+ *   1回分だけ引く（入力順にも依存しない）
  */
 export function computeLiveScores(hands: LiveHandEntry[]): number[] {
   const scores = [0, 0, 0, 0];
   let stickPool = 0; // 場に出ている未回収のリーチ棒の本数（1本=1000点）
 
-  for (const h of hands) {
-    if (h.winType === "chombo") continue;
+  for (const group of groupHandsByRound(hands.filter((h) => h.winType !== "chombo"))) {
+    if (group.length > 1) {
+      const loserSeat = group[0]!.loserSeat!;
+      const riichiSeats = new Set(group.flatMap((h) => h.riichiSeats));
+      for (const seat of riichiSeats) {
+        scores[seat]! -= 1000;
+        stickPool += 1;
+      }
+      const head = headWinnerSeat(
+        group.map((h) => h.winnerSeat!),
+        loserSeat,
+      );
+      scores[head]! += stickPool * 1000;
+      stickPool = 0;
+      for (const h of group) {
+        if (h.points == null) continue;
+        const amount = h.points + (h.winnerSeat === head ? 300 * h.honba : 0);
+        scores[h.winnerSeat!]! += amount;
+        scores[loserSeat]! -= amount;
+      }
+      continue;
+    }
 
+    const h = group[0]!;
     for (const seat of h.riichiSeats) {
       scores[seat]! -= 1000;
       stickPool += 1;
@@ -214,6 +292,8 @@ export interface RoundProgressEntry {
   dealerSeat: number;
   /** 和了者の座席。ロン・ツモ以外はnull */
   winnerSeat: number | null;
+  /** ロン時の放銃者の座席。ダブロンの判定に使う */
+  loserSeat?: number | null;
   /** 流局時のテンパイ者の座席一覧 */
   tenpaiSeats: number[];
 }
@@ -242,13 +322,31 @@ export function computeNextRoundState(
   hands: RoundProgressEntry[],
   maxRoundIndex: number,
 ): { roundIndex: number; honba: number } {
-  const relevant = hands.filter((h) => h.winType !== "chombo");
-  const last = relevant[relevant.length - 1];
+  const last = lastRoundResult(hands);
   if (!last) return { roundIndex: 0, honba: 0 };
 
-  const roundIndex = isDealerContinuing(last) ? last.roundIndex : Math.min(last.roundIndex + 1, maxRoundIndex);
-  const honba = last.winType === "draw" || isDealerContinuing(last) ? last.honba + 1 : 0;
+  const roundIndex = last.dealerContinuing ? last.roundIndex : Math.min(last.roundIndex + 1, maxRoundIndex);
+  const honba = last.winType === "draw" || last.dealerContinuing ? last.honba + 1 : 0;
   return { roundIndex, honba };
+}
+
+/**
+ * 直近の1局（チョンボを除く。ダブロンは2行で1局）の結果。親の続投はダブロンなら
+ * どちらかの和了者が親であれば続投とする。履歴が無ければnull。
+ */
+export function lastRoundResult(
+  hands: RoundProgressEntry[],
+): { winType: string; roundIndex: number; honba: number; dealerContinuing: boolean } | null {
+  const groups = groupHandsByRound(hands.filter((h) => h.winType !== "chombo"));
+  const group = groups[groups.length - 1];
+  if (!group) return null;
+  const first = group[0]!;
+  return {
+    winType: first.winType,
+    roundIndex: first.roundIndex,
+    honba: first.honba,
+    dealerContinuing: group.some(isDealerContinuing),
+  };
 }
 
 export interface YakumanChipResult {
